@@ -1,0 +1,7 @@
+# Keep source-context material and local build artifacts out of the deploy upload
+*.pdf
+*.zip
+_gtm_extracted
+.next
+node_modules
+.DS_Store
