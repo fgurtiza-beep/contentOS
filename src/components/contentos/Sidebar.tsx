@@ -9,6 +9,7 @@ const PRIMARY = [
   { href: "/contentos", label: "Dashboard", ico: "◧", exact: true },
   { href: "/contentos/jobs", label: "My Jobs", ico: "▦" },
   { href: "/contentos/review", label: "Human Review Queue", ico: "⚑", queueKey: "review" },
+  { href: "/contentos/clips", label: "Clip Approval Queue", ico: "▶", queueKey: "clips" },
   { href: "/contentos/exports", label: "Exports", ico: "⤓" },
 ];
 
@@ -18,6 +19,7 @@ export function Sidebar() {
   const jobs = useJobs();
   const role = useRole();
   const reviewCount = jobs.filter((j) => j.state === "HUMAN_REVIEW" || j.state === "HELD").length;
+  const clipCount = jobs.reduce((n, j) => n + (j.clipApprovalQueue?.filter((e) => e.status === "pending").length ?? 0), 0);
 
   const isActive = (href: string, exact?: boolean) =>
     exact ? pathname === href : pathname === href || pathname.startsWith(href + "/");
@@ -52,6 +54,7 @@ export function Sidebar() {
               <span className="ico">{n.ico}</span>
               {n.label}
               {n.queueKey === "review" && reviewCount > 0 && <span className="badge">{reviewCount}</span>}
+              {n.queueKey === "clips" && clipCount > 0 && <span className="badge">{clipCount}</span>}
             </Link>
           );
         })}

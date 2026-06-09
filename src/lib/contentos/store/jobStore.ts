@@ -13,6 +13,7 @@
 import type {
   AuditEntry,
   ChangeDecision,
+  ClipApprovalEntry,
   ContentBlock,
   ContentVersion,
   Draft,
@@ -27,6 +28,7 @@ import type {
 import {
   intake,
   runCreatorAndQA,
+  runEditorBriefForClip,
   submitToFinalQA,
   canExport,
   primaryDraft,
@@ -341,6 +343,49 @@ export const jobStore = {
     if (kind === "legal") job.humanReview.legalReviewNeeded = true;
     if (kind === "comms") job.humanReview.commsReviewNeeded = true;
     record({ jobId, actor: reviewer, action: `review_mark_${kind}`, detail: `Marked ${kind} review needed.` });
+    replaceJob(job);
+  },
+
+  /* ---------------- Clip Approval Queue actions -------------------- */
+
+  clipApprove(jobId: string, entryId: string, reviewer: string) {
+    const job = clone(this.getJob(jobId));
+    if (!job?.clipApprovalQueue) return;
+    const entry = job.clipApprovalQueue.find((e) => e.id === entryId);
+    if (!entry) return;
+    entry.status = "approved";
+    entry.reviewedBy = reviewer;
+    entry.reviewedAt = now();
+    job.updatedAt = now();
+    record({ jobId, actor: reviewer, action: "clip_approve", detail: `Clip approved (${entry.candidate.clipType} · ${entry.candidate.startTime}–${entry.candidate.endTime}) — triggering EditorBriefAgent.`, meta: { clipId: entry.clipId, clipType: entry.candidate.clipType } });
+    // Run EditorBriefAgent immediately — approval + brief generation are one atomic pass.
+    const result = runEditorBriefForClip(job, entryId, now());
+    replaceJob(result.job, result.audits);
+  },
+
+  clipReject(jobId: string, entryId: string, reviewer: string, note: string) {
+    const job = clone(this.getJob(jobId));
+    if (!job?.clipApprovalQueue) return;
+    const entry = job.clipApprovalQueue.find((e) => e.id === entryId);
+    if (!entry) return;
+    entry.status = "rejected";
+    entry.reviewedBy = reviewer;
+    entry.reviewedAt = now();
+    entry.notes = note.trim() || "Rejected by reviewer.";
+    job.updatedAt = now();
+    record({ jobId, actor: reviewer, action: "clip_reject", detail: `Clip rejected. Note: ${entry.notes}`, meta: { clipId: entry.clipId } });
+    replaceJob(job);
+  },
+
+  clipEditTimestamps(jobId: string, entryId: string, startTime: string, endTime: string, reviewer: string) {
+    const job = clone(this.getJob(jobId));
+    if (!job?.clipApprovalQueue) return;
+    const entry = job.clipApprovalQueue.find((e) => e.id === entryId);
+    if (!entry) return;
+    const prev = `${entry.candidate.startTime}–${entry.candidate.endTime}`;
+    entry.candidate = { ...entry.candidate, startTime, endTime };
+    job.updatedAt = now();
+    record({ jobId, actor: reviewer, action: "clip_edit_timestamps", detail: `Clip timestamps updated ${prev} → ${startTime}–${endTime}.`, meta: { clipId: entry.clipId } });
     replaceJob(job);
   },
 

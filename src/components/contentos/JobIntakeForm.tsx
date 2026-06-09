@@ -12,6 +12,7 @@ import {
   type Readiness,
   type RiskSensitivity,
   type StandardizedBrief,
+  type VideoSourceType,
 } from "@/lib/contentos/schemas/contentos";
 import { TYPE_META } from "@/lib/contentos/uiMeta";
 import { gtmStudioProductService } from "@/lib/contentos/data/gtmStudioProductService";
@@ -48,12 +49,12 @@ export function JobIntakeForm() {
       <div className="wiz-crumb">
         <button className={`seg ${step === "lane" ? "current" : "done"}`} onClick={() => setStep("lane")}>1 · Workflow</button>
         {lane && <span className="arrow">›</span>}
-        {lane && <button className={`seg ${step === "type" ? "current" : "done"}`} onClick={() => setStep("type")}>{lane === "repurposing" ? "Content Repurposing" : "New Content"}</button>}
+        {lane && <button className={`seg ${step === "type" ? "current" : "done"}`} onClick={() => setStep("type")}>{lane === "repurposing" ? "Content Repurposing" : lane === "video_intelligence" ? "Video Intelligence" : "New Content"}</button>}
         {jobType && step === "brief" && (<><span className="arrow">›</span><span className="seg current">{JOB_TYPES.find((t) => t.value === jobType)?.label}</span></>)}
       </div>
 
       {step === "lane" && (
-        <div className="choice-grid two">
+        <div className="choice-grid three">
           <button className="choice" onClick={() => { setLane("production"); setJobType(null); setStep("type"); }}>
             <div className="ci">✦</div>
             <div className="ct">New Content</div>
@@ -64,6 +65,12 @@ export function JobIntakeForm() {
             <div className="ci">♺</div>
             <div className="ct">Content Repurposing</div>
             <div className="cd">Transform one approved source asset into channel-native derivatives, following IMD 2.0 doctrine.</div>
+            <div className="cgo">Select →</div>
+          </button>
+          <button className="choice video" onClick={() => { setLane("video_intelligence"); setJobType("transcribe_video"); setStep("brief"); }}>
+            <div className="ci">🎬</div>
+            <div className="ct">Video Intelligence</div>
+            <div className="cd">Extract a cleaned transcript, timestamped chapters, executive summary, and key takeaways from any video.</div>
             <div className="cgo">Select →</div>
           </button>
         </div>
@@ -99,6 +106,7 @@ export function JobIntakeForm() {
 
 function BriefForm({ jobType, lane, onSubmit }: { jobType: JobType; lane: AgentLane; onSubmit: (id: string) => void }) {
   const isRepurpose = lane === "repurposing";
+  const isVideoIntel = lane === "video_intelligence";
   const isRegulatory = jobType === "convert_regulatory_update";
   const isCompetitor = jobType === "reframe_competitor_pov";
   const m = TYPE_META[jobType];
@@ -118,6 +126,7 @@ function BriefForm({ jobType, lane, onSubmit }: { jobType: JobType; lane: AgentL
     landingPageType: "" as StandardizedBrief["landingPageType"], datasets: [] as string[],
     amount: m.amountOptions[0] ?? 1, riskSensitivity: "low" as RiskSensitivity,
     srcTitle: "", srcType: "report", srcUrl: "", srcContent: "", srcApproved: true,
+    vidTitle: "", vidUrl: "", vidUrlType: "youtube" as VideoSourceType, vidTranscript: "",
     issuingBody: "DOLE", effectiveDate: "", affectedAudience: "", uncertaintyAreas: "", legalReviewNeeded: true, sproutCTAAllowed: true,
     competitorName: "", allowedToName: false, comparisonsPermitted: false, differentiationPillars: "", prohibitedClaims: "pricing, security, uptime",
     mustCite: true, directQuotesAllowed: false, dataMisrepresentationRisks: "", requiredSources: "",
@@ -131,8 +140,11 @@ function BriefForm({ jobType, lane, onSubmit }: { jobType: JobType; lane: AgentL
     if (isRepurpose) {
       return REPURPOSE_CHANNELS.filter((c) => f.channelQtys[c] > 0).map((c) => ({ channel: c, format: c === "Email" ? "newsletter" : c === "Blog" ? "blog" : "post", quantity: f.channelQtys[c] }));
     }
+    if (isVideoIntel) {
+      return [{ channel: "video_intelligence", format: "transcript_analysis", quantity: 1 }];
+    }
     return [{ channel: jobType, format: jobType, quantity: f.amount }];
-  }, [isRepurpose, f.channelQtys, f.amount, jobType]);
+  }, [isRepurpose, isVideoIntel, f.channelQtys, f.amount, jobType]);
 
   function submit() {
     const brief: StandardizedBrief = {
@@ -145,8 +157,9 @@ function BriefForm({ jobType, lane, onSubmit }: { jobType: JobType; lane: AgentL
       smeNotes: [f.smeNotes, f.specialInstructions].filter(Boolean).join(" — "), painPoints: splitList(f.painPoints),
       complianceContext: f.complianceContext,
       sourceAsset: isRepurpose ? { id: "src_" + Date.now().toString(36), title: f.srcTitle || "Source asset", origin: isRegulatory ? "regulatory" : isCompetitor ? "competitor" : "sprout", assetType: f.srcType, url: f.srcUrl, content: f.srcContent || "Source content pending.", approved: f.srcApproved } : null,
+      videoSource: isVideoIntel ? { id: "vid_" + Date.now().toString(36), title: f.vidTitle || f.title || "Video", url: f.vidUrl, urlType: f.vidUrlType, transcript: f.vidTranscript } : null,
       landingPageType: jobType === "landing_page" ? f.landingPageType || "campaign" : "",
-      datasets: f.datasets, desiredOutputs, volumeTarget: String(isRepurpose ? desiredOutputs.reduce((a, o) => a + o.quantity, 0) : f.amount), riskSensitivity: f.riskSensitivity,
+      datasets: f.datasets, desiredOutputs, volumeTarget: isVideoIntel ? "1" : String(isRepurpose ? desiredOutputs.reduce((a, o) => a + o.quantity, 0) : f.amount), riskSensitivity: f.riskSensitivity,
       regulatory: isRegulatory ? { issuingBody: f.issuingBody, effectiveDate: f.effectiveDate, affectedAudience: f.affectedAudience, uncertaintyAreas: f.uncertaintyAreas, legalReviewNeeded: f.legalReviewNeeded, sproutCTAAllowed: f.sproutCTAAllowed } : undefined,
       competitorAddendum: isCompetitor || f.competitor ? { competitorName: f.competitorName || f.competitor, allowedToNameCompetitor: f.allowedToName, comparisonsPermitted: f.comparisonsPermitted, differentiationPillars: splitList(f.differentiationPillars), prohibitedClaims: splitList(f.prohibitedClaims) } : undefined,
       research: jobType === "convert_external_report" ? { mustCite: f.mustCite, directQuotesAllowed: f.directQuotesAllowed, dataMisrepresentationRisks: f.dataMisrepresentationRisks, requiredSources: splitList(f.requiredSources) } : undefined,
@@ -158,26 +171,60 @@ function BriefForm({ jobType, lane, onSubmit }: { jobType: JobType; lane: AgentL
     <div style={{ maxWidth: 760 }}>
       {/* Section 1 — Required */}
       <AccordionSection num={1} title="Essentials" required defaultOpen>
-        <div className="field"><label>Title</label><input type="text" value={f.title} onChange={(e) => set("title", e.target.value)} placeholder="Working title of the asset" /></div>
-        <div className="field"><label>Objective</label><textarea value={f.objective} onChange={(e) => set("objective", e.target.value)} placeholder="What should this content achieve?" /></div>
-        <div className="row">
-          <div className="field"><label>Content type</label><div className="chip" style={{ fontSize: 12 }}>{m.icon} {JOB_TYPES.find((t) => t.value === jobType)?.label}</div></div>
-          <div className="field">
-            <label>{isRepurpose ? "Outputs per channel" : "How many?"}</label>
-            {isRepurpose ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {REPURPOSE_CHANNELS.map((c) => (
-                  <div key={c} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span className="tiny" style={{ width: 72 }}>{c}</span>
-                    <Stepper value={f.channelQtys[c]} min={0} max={10} onChange={(n) => set("channelQtys", { ...f.channelQtys, [c]: n })} />
-                  </div>
-                ))}
+        <div className="field"><label>Title</label><input type="text" value={f.title} onChange={(e) => set("title", e.target.value)} placeholder={isVideoIntel ? "Intelligence report title" : "Working title of the asset"} /></div>
+        <div className="field"><label>Objective</label><textarea value={f.objective} onChange={(e) => set("objective", e.target.value)} placeholder={isVideoIntel ? "What are you trying to extract or learn from this video?" : "What should this content achieve?"} /></div>
+
+        {isVideoIntel && (
+          <div className="callout" style={{ marginTop: 8 }}>
+            <b>Video source</b>
+            <div className="row" style={{ marginTop: 8 }}>
+              <div className="field">
+                <label>Source type</label>
+                <select value={f.vidUrlType} onChange={(e) => set("vidUrlType", e.target.value as VideoSourceType)}>
+                  <option value="youtube">YouTube</option>
+                  <option value="loom">Loom</option>
+                  <option value="vimeo">Vimeo</option>
+                  <option value="transcript_upload">Upload transcript</option>
+                </select>
               </div>
-            ) : (
-              <Stepper value={f.amount} min={1} max={10} onChange={(n) => set("amount", n)} />
+              <div className="field">
+                <label>Video title <span className="hint">· title of the source video</span></label>
+                <input type="text" value={f.vidTitle} onChange={(e) => set("vidTitle", e.target.value)} placeholder="e.g. Product demo — Q2 2026" />
+              </div>
+            </div>
+            {f.vidUrlType !== "transcript_upload" && (
+              <div className="field">
+                <label>Video URL</label>
+                <input type="text" value={f.vidUrl} onChange={(e) => set("vidUrl", e.target.value)} placeholder={f.vidUrlType === "youtube" ? "https://youtube.com/watch?v=..." : f.vidUrlType === "loom" ? "https://www.loom.com/share/..." : "https://vimeo.com/..."} />
+              </div>
             )}
+            <div className="field">
+              <label>Transcript <span className="hint">· paste auto-generated captions or an uploaded .txt / .srt file</span></label>
+              <textarea rows={8} value={f.vidTranscript} onChange={(e) => set("vidTranscript", e.target.value)} placeholder="Paste the video transcript here…" />
+            </div>
           </div>
-        </div>
+        )}
+
+        {!isVideoIntel && (
+          <div className="row">
+            <div className="field"><label>Content type</label><div className="chip" style={{ fontSize: 12 }}>{m.icon} {JOB_TYPES.find((t) => t.value === jobType)?.label}</div></div>
+            <div className="field">
+              <label>{isRepurpose ? "Outputs per channel" : "How many?"}</label>
+              {isRepurpose ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {REPURPOSE_CHANNELS.map((c) => (
+                    <div key={c} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span className="tiny" style={{ width: 72 }}>{c}</span>
+                      <Stepper value={f.channelQtys[c]} min={0} max={10} onChange={(n) => set("channelQtys", { ...f.channelQtys, [c]: n })} />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <Stepper value={f.amount} min={1} max={10} onChange={(n) => set("amount", n)} />
+              )}
+            </div>
+          </div>
+        )}
       </AccordionSection>
 
       {/* Section 2 — Audience */}
@@ -276,7 +323,7 @@ function BriefForm({ jobType, lane, onSubmit }: { jobType: JobType; lane: AgentL
       </AccordionSection>
 
       <div className="actionbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div className="faint tiny">ContentOS runs risk tiering → context retrieval → {isRepurpose ? "canonical narrative → derivatives" : "PIM → narrative → blueprint → draft"} → QA.</div>
+        <div className="faint tiny">ContentOS runs risk tiering → context retrieval → {isVideoIntel ? "transcript cleaning → chapter detection → executive summary → key takeaways → QA" : isRepurpose ? "canonical narrative → derivatives → QA" : "PIM → narrative → blueprint → draft → QA"}.</div>
         <button className="btn primary accept-all" onClick={submit}>Submit to ContentOS →</button>
       </div>
     </div>

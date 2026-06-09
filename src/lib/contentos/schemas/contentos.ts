@@ -30,7 +30,8 @@ export type JobType =
   | "repurpose_sprout_asset"
   | "convert_external_report"
   | "convert_regulatory_update"
-  | "reframe_competitor_pov";
+  | "reframe_competitor_pov"
+  | "transcribe_video";
 
 export const JOB_TYPES: { value: JobType; label: string; lane: AgentLane }[] = [
   { value: "blog", label: "Blog", lane: "production" },
@@ -48,9 +49,10 @@ export const JOB_TYPES: { value: JobType; label: string; lane: AgentLane }[] = [
   { value: "convert_external_report", label: "External industry report conversion", lane: "repurposing" },
   { value: "convert_regulatory_update", label: "Regulatory update conversion", lane: "repurposing" },
   { value: "reframe_competitor_pov", label: "Competitor POV reframing", lane: "repurposing" },
+  { value: "transcribe_video", label: "Video transcript & intelligence", lane: "video_intelligence" },
 ];
 
-export type AgentLane = "production" | "repurposing";
+export type AgentLane = "production" | "repurposing" | "video_intelligence";
 
 export function laneForJobType(jobType: JobType): AgentLane {
   return JOB_TYPES.find((j) => j.value === jobType)?.lane ?? "production";
@@ -117,6 +119,7 @@ export interface StandardizedBrief {
   painPoints: string[];
   complianceContext: string;
   sourceAsset: SourceAsset | null; // repurposing only
+  videoSource?: VideoSource | null; // video_intelligence only
   landingPageType: "" | "campaign" | "product_solution";
   datasets: string[]; // Databricks approved view ids
   desiredOutputs: DesiredOutput[];
@@ -143,6 +146,21 @@ export interface SourceAsset {
   url: string;
   content: string; // pasted source text or excerpt
   approved: boolean; // IMD 2.0: must be a single APPROVED source asset
+}
+
+export type VideoSourceType = "youtube" | "loom" | "vimeo" | "transcript_upload";
+
+/** Video source — used exclusively by the Video Intelligence lane. */
+export interface VideoSource {
+  id: string;
+  title: string;
+  /** Public URL of the video. Empty string only when urlType is "transcript_upload". */
+  url: string;
+  urlType: VideoSourceType;
+  /** Raw transcript text — either auto-generated captions or an uploaded .txt/.srt file. */
+  transcript: string;
+  /** Estimated duration in seconds if known (used for chapter timestamp calibration). */
+  durationSeconds?: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -432,6 +450,124 @@ export interface QAHandoffPackage {
 }
 
 /* ------------------------------------------------------------------ */
+/* Video Intelligence output types                                    */
+/* ------------------------------------------------------------------ */
+
+export interface TranscriptChapter {
+  /** HH:MM:SS or M:SS start timestamp. */
+  startTime: string;
+  /** HH:MM:SS or M:SS end timestamp. */
+  endTime: string;
+  title: string;
+  summary: string;
+}
+
+export interface KeyTakeaway {
+  /** Main topic heading. */
+  topic: string;
+  bullets: string[];
+}
+
+export interface VideoTranscriptOutput {
+  videoSource: VideoSource;
+  riskTier: RiskTier;
+  cleanedTranscript: string;
+  chapters: TranscriptChapter[];
+  executiveSummary: string;
+  keyTakeaways: KeyTakeaway[];
+  /** Formatted draft assembled for QA review. */
+  draft: Draft;
+  sourceMap: SourceMapEntry[];
+  qaHandoffPackage: QAHandoffPackage;
+}
+
+export type ClipType = "soundbite" | "insight" | "story-beat" | "hook" | "cta";
+
+export interface ClipRiskFlag {
+  reasons: Array<"product_claim" | "regulatory_language">;
+  /** Human-readable explanation of each detected signal. */
+  signals: string[];
+}
+
+export interface ClipCandidate {
+  id: string;
+  /** Index into VideoTranscriptOutput.chapters this clip was extracted from. */
+  chapterIndex: number;
+  startTime: string;
+  endTime: string;
+  excerpt: string;
+  clipType: ClipType;
+  platformFit: {
+    linkedin: number;   // 0–5
+    instagram: number;  // 0–5
+  };
+  /** Composite rank score used to order the candidate list (0–5, desc). */
+  rankScore: number;
+  riskFlag: ClipRiskFlag | null;
+}
+
+export interface EditorBriefPlatformSpec {
+  platform: "LinkedIn" | "Instagram";
+  /** e.g. "16:9", "9:16", "1:1", "4:5" */
+  aspectRatio: string;
+  /** e.g. "Landscape video", "Reels", "Square post" */
+  format: string;
+  maxDurationSec: number;
+  captionCharLimit: number;
+  notes: string;
+}
+
+export interface EditorBrief {
+  id: string;
+  clipId: string;
+  generatedAt: string;
+  /** Exact in-point timestamp from the approved clip. */
+  inPoint: string;
+  /** Exact out-point timestamp from the approved clip. */
+  outPoint: string;
+  durationSec: number;
+  /** Clip angle and hook framing for the editor. */
+  clipAngle: string;
+  /** Strategic rationale: why this clip, for whom, and what it should accomplish. */
+  strategicDescription: string;
+  /** Recommended on-screen text overlay (1–2 lines). */
+  textOverlay: string;
+  /** Ready-to-post caption draft including hashtags. */
+  captionDraft: string;
+  /** Per-platform aspect ratio, format, and duration specs. */
+  platformSpecs: EditorBriefPlatformSpec[];
+  /** Specific CTA instruction for the editor. */
+  ctaInstruction: string;
+  /** Baked-in Markdown export of the full one-page brief. */
+  markdownExport: string;
+  /** Styled HTML export intended for print-to-PDF. */
+  pdfHtmlExport: string;
+}
+
+export interface ClipApprovalEntry {
+  id: string;
+  clipId: string;
+  candidate: ClipCandidate;
+  submittedAt: string;
+  status: "pending" | "approved" | "rejected";
+  reviewedBy?: string;
+  reviewedAt?: string;
+  notes?: string;
+  /** Populated by EditorBriefAgent immediately after approval. */
+  editorBrief?: EditorBrief;
+}
+
+export interface ClipDiscoveryOutput {
+  /** All candidates, sorted by rankScore descending. */
+  candidates: ClipCandidate[];
+  /** Subset whose riskFlag is non-null — routed to Human Review Queue. */
+  flaggedCandidates: ClipCandidate[];
+  /** Subset whose riskFlag is null — routed to Clip Approval Queue. */
+  cleanCandidates: ClipCandidate[];
+  qaHandoffPackage: QAHandoffPackage;
+}
+
+/* ------------------------------------------------------------------ */
 /* Audit & observability                                              */
 /* ------------------------------------------------------------------ */
 
@@ -475,7 +611,8 @@ export type HumanReviewKind =
   | "legal_sensitive"
   | "competitive_claim"
   | "executive_thought_leadership"
-  | "failed_revisions";
+  | "failed_revisions"
+  | "flagged_clip_content";
 
 export interface HumanReviewTicket {
   reasons: HumanReviewKind[];
@@ -500,6 +637,9 @@ export interface Job {
 
   production?: ProductionOutput;
   repurposing?: RepurposingOutput;
+  videoTranscript?: VideoTranscriptOutput;
+  clipDiscovery?: ClipDiscoveryOutput;
+  clipApprovalQueue?: ClipApprovalEntry[];
 
   qaReport: QAReport | null;
   finalQaReport: QAReport | null;
