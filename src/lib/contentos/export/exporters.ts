@@ -53,36 +53,123 @@ function draftToHtml(d: Draft): string {
   return `<!doctype html>\n<html><head><meta charset="utf-8"><title>${esc(d.title)}</title></head>\n<body>\n${body}\n</body></html>`;
 }
 
-/** Render all approved editor briefs for a video-intelligence job. */
+/** Render the job-level editor brief for a video-intelligence job. */
 export function renderEditorBriefExport(job: Job, format: "markdown" | "html"): string {
-  const briefs = (job.clipApprovalQueue ?? [])
-    .filter((e) => e.status === "approved" && e.editorBrief)
-    .map((e) => e.editorBrief!);
+  const brief = job.jobEditorBrief;
 
-  if (briefs.length === 0) return format === "markdown"
-    ? "<!-- No approved editor briefs on this job. -->"
-    : "<p>No approved editor briefs on this job.</p>";
+  if (!brief) return format === "markdown"
+    ? "<!-- No editor brief on this job. Approve at least one clip to generate it. -->"
+    : "<p>No editor brief on this job. Approve at least one clip to generate it.</p>";
 
-  if (format === "markdown") {
-    return briefs.map((b, i) =>
-      `<!-- Brief ${i + 1} of ${briefs.length} -->\n\n${b.markdownExport}`
-    ).join("\n\n---\n\n");
+  return format === "markdown" ? brief.markdownExport : brief.pdfHtmlExport;
+}
+
+/**
+ * Content Calendar CSV — formatted for HubSpot Social bulk scheduling import.
+ *
+ * HubSpot's required columns (in any order): Account, Date, Message, Link,
+ * Photo URL, Campaign. Date format: mm/dd/yy hh:mm.
+ * Ref: https://knowledge.hubspot.com/social/bulk-upload-and-schedule-social-posts
+ *
+ * Hashtags are appended to Message (HubSpot has no separate hashtag field).
+ * Two trailing columns (content_format_recommendation, qa_score) are added for
+ * reference — HubSpot ignores unrecognised column headers on import.
+ *
+ * The Account column uses "DisplayName - AccountType" as a placeholder; the user
+ * must replace the display-name part with their actual connected HubSpot account
+ * name before uploading.
+ *
+ * Row sources (in priority order):
+ *  1. social_production lane  → one row per PlatformPost (richest data)
+ *  2. repurposing lane        → one row per social derivative
+ *  3. everything else         → single row from primaryDraft
+ */
+
+const HUBSPOT_ACCOUNT_TYPE: Record<string, string> = {
+  linkedin:  "LinkedIn Page",
+  instagram: "Instagram Business Account",
+  facebook:  "Facebook Page",
+  x:         "Twitter Profile",
+};
+
+function toHubSpotAccount(displayName: string, platformKey: string): string {
+  const type = HUBSPOT_ACCOUNT_TYPE[platformKey] ?? "Social Account";
+  return `${displayName} - ${type}`;
+}
+
+/** Converts "YYYY-MM-DD" + "HH:MM" → "mm/dd/yy hh:mm" required by HubSpot. */
+function toHubSpotDate(isoDate: string, time: string): string {
+  if (!isoDate) return "";
+  const [year, month, day] = isoDate.split("-");
+  return `${month}/${day}/${year.slice(2)} ${time || "09:00"}`;
+}
+
+export function renderContentCalendarCsv(job: Job): string {
+  const qaScore =
+    (job.finalQaReport ?? job.qaReport)?.overallScore.toFixed(1) ?? "";
+
+  // HubSpot's 6 columns first, then two reference-only trailing columns.
+  const HEADER = [
+    "Account",
+    "Date",
+    "Message",
+    "Link",
+    "Photo URL",
+    "Campaign",
+    "content_format_recommendation",
+    "qa_score",
+  ];
+  const rows: string[][] = [HEADER];
+
+  if (job.lane === "repurposing" && job.repurposing) {
+    const SOCIAL = new Set(["linkedin", "x", "twitter", "instagram", "facebook"]);
+    const pool = job.repurposing.derivatives;
+    const target =
+      pool.filter((d) => SOCIAL.has(d.channel.toLowerCase())).length
+        ? pool.filter((d) => SOCIAL.has(d.channel.toLowerCase()))
+        : pool;
+    for (const d of target) {
+      const copy = d.blocks.filter((b) => b.kind === "paragraph").map((b) => b.text).join(" ");
+      const ctaText = d.blocks.filter((b) => b.kind === "cta").map((b) => b.text).join("; ") || job.brief.cta;
+      const key = d.channel.toLowerCase() === "twitter" ? "x" : d.channel.toLowerCase();
+      rows.push([
+        toHubSpotAccount(d.channel, key),
+        "",
+        copy,
+        ctaText,
+        "",
+        job.brief.campaign || "",
+        d.format,
+        qaScore,
+      ]);
+    }
+  } else {
+    const draft = primaryDraft(job);
+    if (draft) {
+      const copy = draft.blocks.filter((b) => b.kind === "paragraph").map((b) => b.text).join(" ");
+      const ctaText = draft.blocks.filter((b) => b.kind === "cta").map((b) => b.text).join("; ") || job.brief.cta;
+      const ch = (job.brief.channel || draft.channel).toLowerCase();
+      rows.push([
+        toHubSpotAccount(job.brief.channel || draft.channel, ch),
+        "",
+        copy,
+        ctaText,
+        "",
+        job.brief.campaign || "",
+        draft.format,
+        qaScore,
+      ]);
+    }
   }
 
-  // HTML: concatenate each brief's pdfHtmlExport, wrapping all in a single document
-  const bodies = briefs.map((b, i) => {
-    // Extract just the <body> content from each brief's HTML
-    const bodyMatch = b.pdfHtmlExport.match(/<body>([\s\S]*?)<\/body>/);
-    const body = bodyMatch ? bodyMatch[1] : b.pdfHtmlExport;
-    return `<div class="brief-page" style="${i > 0 ? "page-break-before:always;padding-top:32px;" : ""}">${body}</div>`;
-  }).join("\n");
-
-  // Use the first brief's full HTML as the template (it has the <head>/styles)
-  return briefs[0].pdfHtmlExport.replace(
-    /<body>[\s\S]*?<\/body>/,
-    `<body>${bodies}</body>`,
-  );
+  return rows
+    .map((r) =>
+      r.map((cell) => `"${(cell ?? "").replace(/"/g, '""')}"`).join(","),
+    )
+    .join("\n");
 }
+
+export { toHubSpotDate, toHubSpotAccount };
 
 export function renderExport(job: Job, format: ExportFormat): string {
   // Video-intelligence jobs: primary export is the editor brief collection
@@ -122,6 +209,9 @@ export function renderExport(job: Job, format: ExportFormat): string {
         .filter((b) => b.kind === "paragraph" || b.kind === "cta" || b.kind === "h2")
         .map((b) => (b.kind === "cta" ? `\n👉 ${b.text}` : b.text))
         .join("\n\n");
+
+    case "content_calendar_csv":
+      return renderContentCalendarCsv(job);
 
     case "csv_captions": {
       const rows = [["channel", "format", "caption"]];

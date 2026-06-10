@@ -281,10 +281,10 @@ export function submitToFinalQA(input: Job, revisedDraft: Draft, ts: string): Or
 /* ------------------------------------------------------------------ */
 
 /**
- * Runs EditorBriefAgent for a single approved clip and stores the resulting
- * brief on the ClipApprovalEntry. Called by the store immediately after a
- * reviewer approves a clip so approval + brief generation are one atomic
- * operation from the store's perspective.
+ * Regenerates the job-level EditorBrief after a clip is approved.
+ * The brief covers the full approved clip sequence — not a single clip.
+ * Called by the store immediately after approval so approval + brief
+ * generation are one atomic operation from the store's perspective.
  */
 export function runEditorBriefForClip(input: Job, entryId: string, ts: string): OrchestratorResult {
   const job: Job = structuredClone(input);
@@ -293,20 +293,19 @@ export function runEditorBriefForClip(input: Job, entryId: string, ts: string): 
   const entry = job.clipApprovalQueue?.find((e) => e.id === entryId);
   if (!entry || entry.status !== "approved") return { job, audits };
 
-  const videoSource = job.videoTranscript?.videoSource;
-  if (!videoSource) return { job, audits };
+  const approvedCount = (job.clipApprovalQueue ?? []).filter((e) => e.status === "approved").length;
 
-  const editorBrief = timed(job, "editor_brief_agent", () =>
-    runEditorBriefAgent(entry, videoSource, job.brief, ts),
+  const jobEditorBrief = timed(job, "editor_brief_agent", () =>
+    runEditorBriefAgent(job, ts),
   );
-  entry.editorBrief = editorBrief;
+  job.jobEditorBrief = jobEditorBrief;
   job.metrics.costUsd += 0.3;
 
   audits.push(audit(
     job,
     "Editor Brief Agent",
     "brief_generated",
-    `Editor brief generated for clip ${entry.clipId} (${entry.candidate.clipType} · ${entry.candidate.startTime}–${entry.candidate.endTime}). Markdown + PDF exports ready.`,
+    `Editor brief regenerated — ${approvedCount} approved clip(s) in sequence. Markdown + PDF exports ready.`,
   ));
 
   job.updatedAt = ts;

@@ -1,0 +1,70 @@
+{
+  "linkedin": {
+    "displayName": "LinkedIn",
+    "characterLimit": 3000,
+    "hashtagRules": {
+      "maxHashtags": 5,
+      "recommendedHashtags": 3,
+      "placement": "end",
+      "styleNote": "PascalCase preferred (e.g. #HRCompliance, not #hrcompliance)"
+    },
+    "linkBehavior": "in-post",
+    "linkBehaviorNote": "Links are clickable in the post body. They do not reduce character count but LinkedIn may suppress reach for posts with external links. Consider commenting the link as a first comment to protect reach.",
+    "postTypeOptions": ["long_form_post", "carousel", "article", "poll", "video_caption"],
+    "defaultPostType": "long_form_post",
+    "toneGuidance": "Professional, insight-driven, generous with expertise. Avoid corporate jargon. Write like a thoughtful peer, not a press release.",
+    "optimalLength": "300–1,200 characters for highest engagement; up to 3,000 for deep-dive posts.",
+    "structureGuidance": "Hook → Insight or short story → Actionable takeaway → Closing question or soft CTA"
+  },
+  "instagram": {
+    "displayName": "Instagram",
+    "characterLimit": 2200,
+    "hashtagRules": {
+      "maxHashtags": 30,
+      "recommendedHashtags": 10,
+      "placement": "end",
+      "styleNote": "Mix broad (#HRTech) and niche (#PhilippinePayroll) hashtags. Can be moved to first comment to keep captions clean."
+    },
+    "linkBehavior": "bio_link",
+    "linkBehaviorNote": "Instagram does not allow clickable links in captions. Always direct readers to 'link in bio'. Use a link-in-bio tool (e.g. Linktree) to manage multiple destinations.",
+    "postTypeOptions": ["caption", "carousel", "reel_caption", "story"],
+    "defaultPostType": "caption",
+    "toneGuidance": "Human, warm, visually led. The hook must land within the first 125 characters — that's all readers see before 'more'. Use emoji sparingly and purposefully.",
+    "optimalLength": "Hook within 125 characters; body up to 300 characters for captions; hashtags appended or in first comment.",
+    "structureGuidance": "Scroll-stopping hook (125 chars max) → Value or story → Call to action → Hashtag block"
+  },
+  "facebook": {
+    "displayName": "Facebook",
+    "characterLimit": 63206,
+    "hashtagRules": {
+      "maxHashtags": 5,
+      "recommendedHashtags": 2,
+      "placement": "end",
+      "styleNote": "Hashtags add limited discovery value on Facebook; use only the most relevant 2–3."
+    },
+    "linkBehavior": "in-post",
+    "linkBehaviorNote": "Paste the link in the post body. Facebook will generate a link preview automatically. You can delete the raw URL after the preview loads.",
+    "postTypeOptions": ["social_post", "video_post", "link_post", "event"],
+    "defaultPostType": "social_post",
+    "toneGuidance": "Community-oriented, conversational, shareable. Pose questions that invite comments. Avoid hard-sell language — Facebook's algorithm deprioritises overtly promotional posts.",
+    "optimalLength": "40–80 characters for highest engagement; up to 500 characters for storytelling posts; link posts perform best with a short intro.",
+    "structureGuidance": "Question or relatable statement → Context or story → Invite engagement (comment, share, tag someone)"
+  },
+  "x": {
+    "displayName": "X (Twitter)",
+    "characterLimit": 280,
+    "hashtagRules": {
+      "maxHashtags": 2,
+      "recommendedHashtags": 1,
+      "placement": "inline_or_end",
+      "styleNote": "Inline hashtags read more naturally. Never use more than 2 — it looks spammy and harms reach."
+    },
+    "linkBehavior": "in-post",
+    "linkBehaviorNote": "Links are included in the 280-character count and display as shortened t.co URLs (approximately 23 characters each). Account for this when writing copy.",
+    "postTypeOptions": ["tweet", "thread"],
+    "defaultPostType": "tweet",
+    "toneGuidance": "Sharp, punchy, opinionated. Every word earns its place. Take a clear stance — neutral observations get ignored. Threads allow depth; single tweets demand compression.",
+    "optimalLength": "100–240 characters for single tweets. Leave room for a link (23 chars) and one hashtag if needed.",
+    "structureGuidance": "Unexpected angle or contrarian take → Proof point or contrast → Hard stop or minimal CTA"
+  }
+}

@@ -148,7 +148,7 @@ export interface SourceAsset {
   approved: boolean; // IMD 2.0: must be a single APPROVED source asset
 }
 
-export type VideoSourceType = "youtube" | "loom" | "vimeo" | "transcript_upload";
+export type VideoSourceType = "youtube" | "loom" | "vimeo" | "google_drive" | "transcript_upload";
 
 /** Video source — used exclusively by the Video Intelligence lane. */
 export interface VideoSource {
@@ -506,41 +506,92 @@ export interface ClipCandidate {
   riskFlag: ClipRiskFlag | null;
 }
 
-export interface EditorBriefPlatformSpec {
-  platform: "LinkedIn" | "Instagram";
-  /** e.g. "16:9", "9:16", "1:1", "4:5" */
-  aspectRatio: string;
-  /** e.g. "Landscape video", "Reels", "Square post" */
-  format: string;
-  maxDurationSec: number;
-  captionCharLimit: number;
-  notes: string;
+/** One row in the Clip Sequence table. Title Card and End Card rows have no timestamp. */
+export interface ClipSequenceRow {
+  rowType: "title_card" | "clip" | "end_card";
+  /** Sequential clip number. Null for title/end cards. */
+  clipNumber: number | null;
+  speakerName: string;
+  company: string;
+  /** HH:MM:SS.mmm — empty for title/end cards. */
+  timestampIn: string;
+  /** HH:MM:SS.mmm — empty for title/end cards. */
+  timestampOut: string;
+  /** The exact sound bite or VO line in quotes. Empty for title/end cards. */
+  soundbite: string;
+  visualInstruction: string;
+  /** Card copy for title/end cards. Empty for regular clip rows. */
+  cardCopy: string;
 }
 
+/** One row in the Floating Text table. Only present when floating text is used. */
+export interface FloatingTextRow {
+  clipNumber: number;
+  text: string;
+  /** e.g. "lower third", "center", "top" */
+  placement: string;
+}
+
+/**
+ * Structured editor brief covering a full clip sequence (not one brief per clip).
+ * Sections match the brief spec: Project Overview → Audience → Brand → Links →
+ * Clip Sequence → Floating Text → Audio → Visual Style → Subtitles → Checklist.
+ */
 export interface EditorBrief {
   id: string;
-  clipId: string;
   generatedAt: string;
-  /** Exact in-point timestamp from the approved clip. */
-  inPoint: string;
-  /** Exact out-point timestamp from the approved clip. */
-  outPoint: string;
-  durationSec: number;
-  /** Clip angle and hook framing for the editor. */
-  clipAngle: string;
-  /** Strategic rationale: why this clip, for whom, and what it should accomplish. */
-  strategicDescription: string;
-  /** Recommended on-screen text overlay (1–2 lines). */
-  textOverlay: string;
-  /** Ready-to-post caption draft including hashtags. */
-  captionDraft: string;
-  /** Per-platform aspect ratio, format, and duration specs. */
-  platformSpecs: EditorBriefPlatformSpec[];
-  /** Specific CTA instruction for the editor. */
-  ctaInstruction: string;
-  /** Baked-in Markdown export of the full one-page brief. */
+
+  // 1. Project Overview
+  projectTitle: string;
+  videoType: string;
+  targetLengthSec: number;
+  deadline: string;
+  platforms: { name: string; aspectRatio: string; dimensions: string }[];
+
+  // 2. Audience & Intent
+  audience: string;
+  intent: string;
+  outroCta: string;
+
+  // 3. Brand Guidelines
+  brandColors: string[];
+  subtitleFont: string;
+  subtitleStyle: string;
+  logoUsageNote: string;
+  brandBookUrl: string;
+  assetRepositoryUrl: string;
+  brandGuidelinesFound: boolean;
+
+  // 4. Important Links
+  rawVideoFilesUrl: string;
+  transcriptUrl: string;
+  landingPageUrl: string;
+  referenceAssetsUrl: string;
+  inspirationUrl: string;
+
+  // 5. Clip Sequence
+  clipSequence: ClipSequenceRow[];
+
+  // 6. Floating Text (only rendered when rows exist)
+  floatingText: FloatingTextRow[];
+
+  // 7. Audio & Music
+  musicMood: string;
+  specificTracks: string;
+  pacingNote: string;
+  primaryAudioNote: string;
+
+  // 8. Visual Style Notes
+  visualStyleNotes: string;
+
+  // 9. Subtitles
+  subtitleFontName: string;
+  subtitleColor: string;
+  subtitleBackgroundStyle: string;
+  subtitleTiming: string;
+
+  // Exports
   markdownExport: string;
-  /** Styled HTML export intended for print-to-PDF. */
   pdfHtmlExport: string;
 }
 
@@ -553,8 +604,6 @@ export interface ClipApprovalEntry {
   reviewedBy?: string;
   reviewedAt?: string;
   notes?: string;
-  /** Populated by EditorBriefAgent immediately after approval. */
-  editorBrief?: EditorBrief;
 }
 
 export interface ClipDiscoveryOutput {
@@ -640,6 +689,8 @@ export interface Job {
   videoTranscript?: VideoTranscriptOutput;
   clipDiscovery?: ClipDiscoveryOutput;
   clipApprovalQueue?: ClipApprovalEntry[];
+  /** Job-level editor brief. Regenerated whenever a clip is approved. */
+  jobEditorBrief?: EditorBrief;
 
   qaReport: QAReport | null;
   finalQaReport: QAReport | null;
@@ -665,6 +716,7 @@ export type ExportFormat =
   | "hubspot"
   | "linkedin"
   | "csv_captions"
+  | "content_calendar_csv"
   | "html"
   | "json_package";
 
@@ -674,6 +726,7 @@ export const EXPORT_FORMATS: { value: ExportFormat; label: string }[] = [
   { value: "hubspot", label: "HubSpot" },
   { value: "linkedin", label: "LinkedIn-ready copy" },
   { value: "csv_captions", label: "CSV captions" },
+  { value: "content_calendar_csv", label: "Content Calendar CSV" },
   { value: "html", label: "HTML preview" },
   { value: "json_package", label: "JSON job package" },
 ];
@@ -686,3 +739,42 @@ export const QA_PASS_THRESHOLD = 4.5;
 export const QA_REVISION_FLOOR = 3.0;
 export const PRODUCT_GTM_REVIEW_FLOOR = 4.0;
 export const MAX_REVISION_ATTEMPTS = 2;
+
+/* ------------------------------------------------------------------ */
+/* Trend Signal Monitor                                               */
+/* ------------------------------------------------------------------ */
+
+export type TrendSignalCategory =
+  | "hr_technology_ph"
+  | "payroll_compliance_ph"
+  | "dole_sss_bir_philhealth"
+  | "b2b_saas_sea"
+  | "workforce_management"
+  | "ai_in_hr";
+
+export const TREND_CATEGORY_LABELS: Record<TrendSignalCategory, string> = {
+  hr_technology_ph:      "HR Technology PH",
+  payroll_compliance_ph: "Payroll Compliance PH",
+  dole_sss_bir_philhealth: "DOLE / SSS / BIR / PhilHealth",
+  b2b_saas_sea:          "B2B SaaS SEA",
+  workforce_management:  "Workforce Management",
+  ai_in_hr:              "AI in HR",
+};
+
+export interface TrendSignal {
+  id: string;
+  category: TrendSignalCategory;
+  topicName: string;
+  source: string;
+  sourceUrl: string;
+  relevanceScore: number;
+  contentAngle: string;
+  riskFlag: { hasRisk: boolean; reason: string } | null;
+}
+
+export interface TrendDigest {
+  id: string;
+  generatedAt: string;
+  weekOf: string;
+  signals: TrendSignal[];
+}

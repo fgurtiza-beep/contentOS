@@ -7,6 +7,7 @@ import { primaryDraft } from "@/lib/contentos/orchestrator/contentOrchestrator";
 import { DraftView } from "./DraftEditor";
 import { RiskBadge } from "./badges";
 import { JOB_TYPES, type HumanReviewKind, type Job } from "@/lib/contentos/schemas/contentos";
+import { ClipCard, ClipDetail, type QueueItem } from "./ClipApprovalQueue";
 
 const REVIEWER = "marketing@sprout.ph";
 
@@ -32,44 +33,124 @@ function primaryReason(j: Job): HumanReviewKind | null {
   return order.find((r) => reasons.includes(r)) ?? reasons[0] ?? null;
 }
 
+type OpenState =
+  | { kind: "none" }
+  | { kind: "written"; jobId: string }
+  | { kind: "clip"; jobId: string; entryId: string };
+
 export function HumanReviewQueue() {
   const jobs = useJobs();
-  const queue = jobs.filter((j) => j.state === "HUMAN_REVIEW" || j.state === "HELD");
-  const [openId, setOpenId] = useState<string | null>(null);
-  const open = queue.find((j) => j.id === openId);
+  const [open, setOpen] = useState<OpenState>({ kind: "none" });
+
+  const writtenQueue = jobs.filter((j) => j.state === "HUMAN_REVIEW" || j.state === "HELD");
+
+  const clipItems: QueueItem[] = jobs.flatMap((j) =>
+    (j.clipApprovalQueue ?? [])
+      .filter((e) => e.status === "pending")
+      .map((e) => ({ job: j, entry: e })),
+  );
+
+  // Resolve open written job
+  const openWritten = open.kind === "written"
+    ? writtenQueue.find((j) => j.id === open.jobId) ?? null
+    : null;
+
+  // Resolve open clip item (including post-approval so brief stays visible)
+  const openClip: QueueItem | null = open.kind === "clip"
+    ? (() => {
+        const job   = jobs.find((j) => j.id === (open as { kind: "clip"; jobId: string; entryId: string }).jobId);
+        const entry = job?.clipApprovalQueue?.find((e) => e.id === (open as { kind: "clip"; jobId: string; entryId: string }).entryId);
+        return job && entry ? { job, entry } : null;
+      })()
+    : null;
+
+  const anyOpen = open.kind !== "none";
+  const isEmpty = writtenQueue.length === 0 && clipItems.length === 0;
 
   return (
     <div className="content wide">
       <div className="page-head">
         <h1>Human Review</h1>
-        <p>{open ? "Review the content on the left against the summary on the right, then decide." : "Content that needs a human decision. Each card tells you why and what to check."}</p>
+        <p>
+          {open.kind === "written"
+            ? "Review the content on the left against the summary on the right, then decide."
+            : open.kind === "clip"
+              ? openClip?.entry.status === "approved"
+                ? "Clip approved. Editor brief generated below — download Markdown or PDF."
+                : "Review the clip, adjust timestamps if needed, then approve or reject."
+              : "Content that needs a human decision. Each card tells you why and what to check."}
+        </p>
       </div>
 
-      {queue.length === 0 && <div className="panel empty">Queue is clear. Nothing awaiting human review.</div>}
-
-      {!open && queue.length > 0 && (
-        <div className="choice-grid three">
-          {queue.map((j) => {
-            const pr = primaryReason(j);
-            const info = pr ? REASON_TEXT[pr] : null;
-            const tierCls = j.risk?.tier === 2 ? "t2" : j.risk?.tier === 1 ? "t1" : "";
-            return (
-              <div key={j.id} className={`rcard ${tierCls}`}>
-                <div className="rrow">
-                  <RiskBadge tier={j.risk?.tier ?? null} />
-                  <span className="faint tiny">{jobTypeLabel(j)}</span>
-                </div>
-                <div className="rt">{j.brief.title}</div>
-                <div className="reason"><b>Reason:</b> {info?.reason ?? "Routed for review."}</div>
-                {info && <div className="rec">Recommended: {info.action}</div>}
-                <button className="btn primary sm" style={{ marginTop: 4, alignSelf: "flex-start" }} onClick={() => setOpenId(j.id)}>Review →</button>
-              </div>
-            );
-          })}
-        </div>
+      {/* Detail: written post */}
+      {openWritten && (
+        <ReviewDetail job={openWritten} onBack={() => setOpen({ kind: "none" })} />
       )}
 
-      {open && <ReviewDetail job={open} onBack={() => setOpenId(null)} />}
+      {/* Detail: clip */}
+      {openClip && (
+        <ClipDetail item={openClip} onBack={() => setOpen({ kind: "none" })} />
+      )}
+
+      {/* List view — both sections */}
+      {!anyOpen && (
+        <>
+          {isEmpty && (
+            <div className="panel empty">Queue is clear. Nothing awaiting human review.</div>
+          )}
+
+          {/* ── Written content section ── */}
+          {writtenQueue.length > 0 && (
+            <>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--text-muted)", marginBottom: 10 }}>
+                Written content
+              </div>
+              <div className="choice-grid three">
+                {writtenQueue.map((j) => {
+                  const pr = primaryReason(j);
+                  const info = pr ? REASON_TEXT[pr] : null;
+                  const tierCls = j.risk?.tier === 2 ? "t2" : j.risk?.tier === 1 ? "t1" : "";
+                  return (
+                    <div key={j.id} className={`rcard ${tierCls}`}>
+                      <div className="rrow">
+                        <RiskBadge tier={j.risk?.tier ?? null} />
+                        <span className="faint tiny">{jobTypeLabel(j)}</span>
+                      </div>
+                      <div className="rt">{j.brief.title}</div>
+                      <div className="reason"><b>Reason:</b> {info?.reason ?? "Routed for review."}</div>
+                      {info && <div className="rec">Recommended: {info.action}</div>}
+                      <button className="btn primary sm" style={{ marginTop: 4, alignSelf: "flex-start" }} onClick={() => setOpen({ kind: "written", jobId: j.id })}>Review →</button>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {/* ── Clip candidates section ── */}
+          <div style={{ marginTop: writtenQueue.length > 0 ? 32 : 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--text-muted)", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+              Video clip candidates
+              {clipItems.length > 0 && (
+                <span className="badge" style={{ fontSize: 10 }}>{clipItems.length}</span>
+              )}
+            </div>
+            {clipItems.length === 0 ? (
+              <div className="panel empty" style={{ fontSize: 13 }}>No clip candidates awaiting approval.</div>
+            ) : (
+              <div className="choice-grid three">
+                {clipItems.map((item) => (
+                  <ClipCard
+                    key={item.entry.id}
+                    item={item}
+                    onOpen={() => setOpen({ kind: "clip", jobId: item.job.id, entryId: item.entry.id })}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

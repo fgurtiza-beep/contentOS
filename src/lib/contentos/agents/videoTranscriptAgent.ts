@@ -55,7 +55,7 @@ export function runVideoTranscriptAgent(
       `A URL is required for ${src.urlType} sources. Provide the full video URL.`,
     );
   }
-  if (!src.transcript.trim()) {
+  if (src.urlType === "transcript_upload" && !src.transcript.trim()) {
     throw new VideoTranscriptError(
       "Transcript content is empty. Paste the transcript text or upload a .txt / .srt file.",
     );
@@ -64,8 +64,9 @@ export function runVideoTranscriptAgent(
   // ---- Platform classification -------------------------------------------
   const platform = classifyPlatform(src.url, src.urlType);
 
-  // ---- Stage 1: Clean the raw transcript ---------------------------------
-  const cleanedTranscript = cleanTranscript(src.transcript);
+  // ---- Stage 1: Clean the raw transcript (or generate stub) --------------
+  const rawTranscript = src.transcript.trim() || generateStubTranscript(brief, src, platform);
+  const cleanedTranscript = cleanTranscript(rawTranscript);
 
   // ---- Stage 2: Detect timestamped chapters ------------------------------
   const chapters = detectChapters(cleanedTranscript, brief, src);
@@ -119,12 +120,56 @@ export function runVideoTranscriptAgent(
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Generates a plausible stub transcript when the user provides a URL but no
+ * transcript text. In production this would be replaced by a Whisper / AssemblyAI
+ * API call. The stub is clearly labelled so reviewers know it is synthetic.
+ */
+function generateStubTranscript(
+  brief: StandardizedBrief,
+  src: VideoSource,
+  platform: string,
+): string {
+  const title     = src.title || brief.title || "this video";
+  const icp       = brief.primaryICP || "teams";
+  const product   = brief.product || "the platform";
+  const pains     = (brief.painPoints ?? []).slice(0, 4);
+  const objective = brief.objective || "address key challenges";
+
+  const painLines = pains.length
+    ? pains.map((p, i) => `${i === 0 ? "One of the biggest things we see" : "Another area"} is ${p.toLowerCase()}. That's something we hear about constantly from ${icp}. And the way we think about it is — you need a clear process before you can automate anything. Automation amplifies both good and bad habits.`).join("\n\n")
+    : `The biggest challenge we see is inconsistency in how teams handle their core processes. That's something we hear about constantly from ${icp}. And the way we think about it is — you need a clear process before you can automate anything.`;
+
+  return [
+    `[Auto-transcribed from ${platform} — stub data · production would call speech-to-text API · URL: ${src.url}]`,
+    ``,
+    `Alright, so today we're going to be talking about ${title}. I think this is something that a lot of ${icp} are really wrestling with right now, and I want to make sure we give you something concrete and actionable that you can take back to your team.`,
+    ``,
+    `So let me start with a bit of context. When we think about ${objective}, the first thing that usually comes up is — where do teams actually lose time? And I think the answer is almost always the same. It's the manual work. The stuff that should be handled by a system but isn't.`,
+    ``,
+    painLines,
+    ``,
+    `And when we look at how ${product} approaches this, the philosophy is pretty simple. You want to standardize before you automate. You want to make sure that when you hand something off to a system, the system is doing exactly what you would have done manually — just faster and more consistently.`,
+    ``,
+    `So let's talk about what that looks like in practice. The first thing you want to do is map your current process. Not the ideal process — the actual process. Because there are always gaps between what the documentation says and what people actually do day to day.`,
+    ``,
+    `The second thing is you want to identify your highest-frequency, lowest-complexity tasks. Those are your best automation candidates. High complexity tasks you want to keep a human in the loop for, at least initially.`,
+    ``,
+    `The third thing — and this is where a lot of teams get tripped up — is change management. You can have the best system in the world, but if your team doesn't trust it or doesn't know how to use it, it won't stick. So invest in onboarding and feedback loops.`,
+    ``,
+    `To summarize, the key things to take away from today are: standardize first, start with high-frequency low-complexity tasks, and don't underestimate the change management piece. Those three things will set you up for a much smoother rollout.`,
+    ``,
+    `If you want to learn more, feel free to reach out to the team. We're happy to walk you through how ${product} can help you get there. Thanks for watching.`,
+  ].join("\n");
+}
+
 function classifyPlatform(url: string, urlType: VideoSource["urlType"]): string {
   if (urlType === "transcript_upload") return "Uploaded transcript";
   const u = url.toLowerCase();
   if (u.includes("youtube.com") || u.includes("youtu.be")) return "YouTube";
   if (u.includes("loom.com")) return "Loom";
   if (u.includes("vimeo.com")) return "Vimeo";
+  if (u.includes("drive.google.com")) return "Google Drive";
   return urlType.charAt(0).toUpperCase() + urlType.slice(1);
 }
 

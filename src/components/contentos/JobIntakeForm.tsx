@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { jobStore } from "@/lib/contentos/store/useStore";
 import { CURRENT_USER } from "@/lib/contentos/store/uiStore";
 import {
@@ -25,15 +25,22 @@ const READINESS: Readiness[] = ["unaware", "problem_aware", "solution_aware", "e
 const INTENTS: ContentIntent[] = ["awareness", "consideration", "evaluation", "conversion", "retention", "advocacy"];
 const REPURPOSE_CHANNELS = ["LinkedIn", "X", "Instagram", "Email", "Blog"];
 
+
 const splitList = (s: string) => s.split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
 
 type Step = "lane" | "type" | "brief";
 
 export function JobIntakeForm() {
   const router = useRouter();
-  const [step, setStep] = useState<Step>("lane");
-  const [lane, setLane] = useState<AgentLane | null>(null);
-  const [jobType, setJobType] = useState<JobType | null>(null);
+  const searchParams = useSearchParams();
+
+  const initialLane   = (searchParams.get("lane") as AgentLane | null) ?? null;
+  const initialType   = (searchParams.get("type") as JobType | null) ?? null;
+  const initialStep: Step = initialLane && initialType ? "brief" : initialLane ? "type" : "lane";
+
+  const [step, setStep] = useState<Step>(initialStep);
+  const [lane, setLane] = useState<AgentLane | null>(initialLane);
+  const [jobType, setJobType] = useState<JobType | null>(initialType);
 
   return (
     <div className="content">
@@ -116,8 +123,13 @@ function BriefForm({ jobType, lane, onSubmit }: { jobType: JobType; lane: AgentL
   const campaigns = campaignKnowledgeService.list();
   const views = databricksApprovedViewsService.list();
 
+  const searchParams = useSearchParams();
+  const trendTopic = searchParams.get("trend") ?? "";
+  const trendAngle = searchParams.get("angle") ?? "";
+  const [trendBannerDismissed, setTrendBannerDismissed] = useState(false);
+
   const [f, setF] = useState({
-    title: "", objective: "",
+    title: trendTopic, objective: trendAngle,
     primaryICP: "SME HR Leader", secondaryICPs: "", industry: "Professional services", segment: "SME",
     persona: "HR generalist wearing multiple hats", readiness: "problem_aware" as Readiness,
     contentIntent: ["awareness"] as ContentIntent[], tone: "professional, human, helpful", length: m.outputSize, channel: jobType,
@@ -169,6 +181,29 @@ function BriefForm({ jobType, lane, onSubmit }: { jobType: JobType; lane: AgentL
 
   return (
     <div style={{ maxWidth: 760 }}>
+      {trendTopic && !trendBannerDismissed && (
+        <div style={{
+          background: "#8139ee18", border: "1px solid #8139ee44", borderRadius: 8,
+          padding: "10px 14px", marginBottom: 16,
+          display: "flex", gap: 10, alignItems: "flex-start",
+        }}>
+          <span style={{ fontSize: 14, flexShrink: 0 }}>⟳</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#8139ee", marginBottom: 2 }}>
+              Pre-filled from Trend Signal
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
+              <b>Topic:</b> {trendTopic}
+              {trendAngle && <><br /><b>Angle:</b> {trendAngle}</>}
+            </div>
+          </div>
+          <button onClick={() => setTrendBannerDismissed(true)}
+            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-faint)", fontSize: 16, lineHeight: 1, padding: 0 }}>
+            ×
+          </button>
+        </div>
+      )}
+
       {/* Section 1 — Required */}
       <AccordionSection num={1} title="Essentials" required defaultOpen>
         <div className="field"><label>Title</label><input type="text" value={f.title} onChange={(e) => set("title", e.target.value)} placeholder={isVideoIntel ? "Intelligence report title" : "Working title of the asset"} /></div>
@@ -184,6 +219,7 @@ function BriefForm({ jobType, lane, onSubmit }: { jobType: JobType; lane: AgentL
                   <option value="youtube">YouTube</option>
                   <option value="loom">Loom</option>
                   <option value="vimeo">Vimeo</option>
+                  <option value="google_drive">Google Drive</option>
                   <option value="transcript_upload">Upload transcript</option>
                 </select>
               </div>
@@ -195,12 +231,24 @@ function BriefForm({ jobType, lane, onSubmit }: { jobType: JobType; lane: AgentL
             {f.vidUrlType !== "transcript_upload" && (
               <div className="field">
                 <label>Video URL</label>
-                <input type="text" value={f.vidUrl} onChange={(e) => set("vidUrl", e.target.value)} placeholder={f.vidUrlType === "youtube" ? "https://youtube.com/watch?v=..." : f.vidUrlType === "loom" ? "https://www.loom.com/share/..." : "https://vimeo.com/..."} />
+                <input type="text" value={f.vidUrl} onChange={(e) => set("vidUrl", e.target.value)} placeholder={f.vidUrlType === "youtube" ? "https://youtube.com/watch?v=..." : f.vidUrlType === "loom" ? "https://www.loom.com/share/..." : f.vidUrlType === "google_drive" ? "https://drive.google.com/file/d/..." : "https://vimeo.com/..."} />
               </div>
             )}
             <div className="field">
-              <label>Transcript <span className="hint">· paste auto-generated captions or an uploaded .txt / .srt file</span></label>
-              <textarea rows={8} value={f.vidTranscript} onChange={(e) => set("vidTranscript", e.target.value)} placeholder="Paste the video transcript here…" />
+              <label>
+                Transcript
+                {f.vidUrlType === "transcript_upload"
+                  ? <span className="hint"> · required — paste .txt or .srt file contents</span>
+                  : <span className="hint"> · optional — leave blank to auto-transcribe from the URL above</span>}
+              </label>
+              <textarea
+                rows={f.vidUrlType === "transcript_upload" ? 8 : 5}
+                value={f.vidTranscript}
+                onChange={(e) => set("vidTranscript", e.target.value)}
+                placeholder={f.vidUrlType === "transcript_upload"
+                  ? "Paste the transcript text here…"
+                  : "Optional — paste an existing transcript to use it instead of auto-transcribing."}
+              />
             </div>
           </div>
         )}

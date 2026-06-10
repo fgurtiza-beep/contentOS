@@ -1,0 +1,186 @@
+{
+  "version": "1.0",
+  "description": "Opening hook library for the PlatformAdaptationAgent. Each entry is a platform-native hook tagged by platform, ICP, content_type, and funnel_stage. performance_tier is left blank until analytics are connected.",
+  "hooks": [
+    {
+      "id": "hook_001",
+      "text": "Most HR teams in the Philippines are still manually computing 13th month pay in a spreadsheet they haven't updated since 2021. Here's what that actually costs you.",
+      "platform": "linkedin",
+      "icp": "SME HR Leader",
+      "content_type": "social_post",
+      "funnel_stage": "awareness",
+      "performance_tier": null
+    },
+    {
+      "id": "hook_002",
+      "text": "Your board wants a workforce analytics dashboard. Your HR team is still copying numbers from four disconnected tools into one master Excel file. These two problems are the same problem.",
+      "platform": "linkedin",
+      "icp": "CHRO / People Leader",
+      "content_type": "social_post",
+      "funnel_stage": "awareness",
+      "performance_tier": null
+    },
+    {
+      "id": "hook_003",
+      "text": "We've looked at payroll setups across 500+ Philippine SMEs. The ones that hit compliance issues weren't careless — they were using the right system for 20 employees and scaling it to 200.",
+      "platform": "linkedin",
+      "icp": "SME HR Leader",
+      "content_type": "social_post",
+      "funnel_stage": "consideration",
+      "performance_tier": null
+    },
+    {
+      "id": "hook_004",
+      "text": "If your HR team is the last person in the office on payroll day, that's not dedication — it's a process failure you've normalized. There's a fix, and it doesn't require a new headcount.",
+      "platform": "linkedin",
+      "icp": "CEO / Business Owner (SME)",
+      "content_type": "social_post",
+      "funnel_stage": "conversion",
+      "performance_tier": null
+    },
+    {
+      "id": "hook_005",
+      "text": "When evaluating a payroll system, one question exposes more than any feature list: does it auto-apply SSS, PhilHealth, and Pag-IBIG table updates — or do you have to do it manually every time the government changes rates?",
+      "platform": "linkedin",
+      "icp": "Comp & Ben Manager",
+      "content_type": "social_post",
+      "funnel_stage": "evaluation",
+      "performance_tier": null
+    },
+    {
+      "id": "hook_006",
+      "text": "The cost of a Philippine payroll error isn't just the correction. It's the DOLE exposure, the employee trust repair, and the hours your HR team won't get back. Here's what the numbers actually look like.",
+      "platform": "linkedin",
+      "icp": "all",
+      "content_type": "article_link",
+      "funnel_stage": "consideration",
+      "performance_tier": null
+    },
+    {
+      "id": "hook_007",
+      "text": "Your HR team didn't sign up to be a math tutor. 📊 Yet here they are — double-checking formulas at 11pm before payday. There's a better way. 👆",
+      "platform": "instagram",
+      "icp": "SME HR Leader",
+      "content_type": "caption",
+      "funnel_stage": "awareness",
+      "performance_tier": null
+    },
+    {
+      "id": "hook_008",
+      "text": "Quick check: when did you last audit your payroll for compliance gaps? 🤔 Most Philippine businesses only find out they have a problem when DOLE shows up first.",
+      "platform": "instagram",
+      "icp": "all",
+      "content_type": "caption",
+      "funnel_stage": "awareness",
+      "performance_tier": null
+    },
+    {
+      "id": "hook_009",
+      "text": "Swipe to see the 5 payroll compliance checkpoints every Philippine SME should be hitting — and how many your current setup is actually covering. ➡️",
+      "platform": "instagram",
+      "icp": "SME HR Leader",
+      "content_type": "carousel",
+      "funnel_stage": "consideration",
+      "performance_tier": null
+    },
+    {
+      "id": "hook_010",
+      "text": "3 signs your business has outgrown manual HR — and what to do this month. 👇 (No. 2 is the one most founders ignore until it's too late.)",
+      "platform": "instagram",
+      "icp": "CEO / Business Owner (SME)",
+      "content_type": "caption",
+      "funnel_stage": "conversion",
+      "performance_tier": null
+    },
+    {
+      "id": "hook_011",
+      "text": "Your team notices when payday is smooth. 🙌 They notice even more when it isn't. Consistent, error-free payroll is one of the simplest forms of employee recognition.",
+      "platform": "instagram",
+      "icp": "all",
+      "content_type": "caption",
+      "funnel_stage": "retention",
+      "performance_tier": null
+    },
+    {
+      "id": "hook_012",
+      "text": "Here's a question every SME owner in the Philippines should ask: when was the last time you were 100% confident your payroll was DOLE-compliant? If you had to pause before answering, keep reading.",
+      "platform": "facebook",
+      "icp": "CEO / Business Owner (SME)",
+      "content_type": "social_post",
+      "funnel_stage": "awareness",
+      "performance_tier": null
+    },
+    {
+      "id": "hook_013",
+      "text": "We asked 200 HR professionals across the Philippines what their biggest compliance worry is heading into the second half of the year. The #1 answer wasn't what we expected — and it's something every SME should hear.",
+      "platform": "facebook",
+      "icp": "all",
+      "content_type": "social_post",
+      "funnel_stage": "consideration",
+      "performance_tier": null
+    },
+    {
+      "id": "hook_014",
+      "text": "Before you choose a payroll provider, ask them this: what happens to my historical data during migration, and how long does parallel run take? The answer will tell you everything about the vendor.",
+      "platform": "facebook",
+      "icp": "SME HR Leader",
+      "content_type": "social_post",
+      "funnel_stage": "evaluation",
+      "performance_tier": null
+    },
+    {
+      "id": "hook_015",
+      "text": "13th month annualization season is less than 4 months away. If you're already feeling anxious about the calculation, that's not nerves — that's your system telling you something important.",
+      "platform": "facebook",
+      "icp": "Comp & Ben Manager",
+      "content_type": "social_post",
+      "funnel_stage": "awareness",
+      "performance_tier": null
+    },
+    {
+      "id": "hook_016",
+      "text": "Every peso your business loses to payroll errors, duplicate entries, or late government remittances is a peso that could've gone to your people. Here's how Philippine SMEs are stopping the leak.",
+      "platform": "facebook",
+      "icp": "CEO / Business Owner (SME)",
+      "content_type": "social_post",
+      "funnel_stage": "conversion",
+      "performance_tier": null
+    },
+    {
+      "id": "hook_017",
+      "text": "Manual payroll in the Philippines has a hidden cost most people never count: the hours your HR team spends fixing what the spreadsheet missed. Those hours add up to a full-time salary.",
+      "platform": "x",
+      "icp": "SME HR Leader",
+      "content_type": "tweet",
+      "funnel_stage": "awareness",
+      "performance_tier": null
+    },
+    {
+      "id": "hook_018",
+      "text": "The most expensive HR mistake isn't a bad hire. It's a payroll system that was fine for 20 employees — deployed for 200.",
+      "platform": "x",
+      "icp": "all",
+      "content_type": "tweet",
+      "funnel_stage": "consideration",
+      "performance_tier": null
+    },
+    {
+      "id": "hook_019",
+      "text": "Evaluating HR systems? Ask: does it auto-update for SSS, PhilHealth, and Pag-IBIG rate changes? If the answer is \"our team handles that\" — that IS your answer.",
+      "platform": "x",
+      "icp": "CEO / Business Owner (SME)",
+      "content_type": "tweet",
+      "funnel_stage": "evaluation",
+      "performance_tier": null
+    },
+    {
+      "id": "hook_020",
+      "text": "Philippine payroll has 7 mandatory deduction categories. Most homegrown spreadsheets track 4. The gap between those numbers is your compliance liability.",
+      "platform": "x",
+      "icp": "Comp & Ben Manager",
+      "content_type": "tweet",
+      "funnel_stage": "awareness",
+      "performance_tier": null
+    }
+  ]
+}
