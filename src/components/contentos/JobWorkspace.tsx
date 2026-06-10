@@ -3,6 +3,7 @@
 import { Fragment, useState } from "react";
 import Link from "next/link";
 import { useJob } from "@/lib/contentos/store/useStore";
+import { useRole } from "@/lib/contentos/store/uiStore";
 import { primaryDraft } from "@/lib/contentos/orchestrator/contentOrchestrator";
 import { WorkflowStepper } from "./WorkflowStepper";
 import { AgentWorkflowProgress } from "./AgentWorkflowProgress";
@@ -11,6 +12,7 @@ import { BlueprintPanel } from "./BlueprintPanel";
 import { ClaimsPanel } from "./AgentOutputPanel";
 import { DraftView } from "./DraftEditor";
 import { QAReviewWorkspace } from "./QAReviewWorkspace";
+import { StakeholderReview } from "./StakeholderReview";
 import { ExportPanel } from "./ExportPanel";
 import { AuditTrail } from "./AuditTrail";
 import { RiskBadge, StateBadge, ScorePill } from "./badges";
@@ -20,7 +22,8 @@ type Tab = "overview" | "agent" | "qa" | "export" | "audit";
 
 export function JobWorkspace({ id }: { id: string }) {
   const job = useJob(id);
-  const [tab, setTab] = useState<Tab>("qa");
+  const role = useRole();
+  const [adminOpen, setAdminOpen] = useState(false);
 
   if (!job) {
     return (
@@ -32,6 +35,30 @@ export function JobWorkspace({ id }: { id: string }) {
     );
   }
 
+  return (
+    <div className="content wide">
+      <Link href="/contentos" className="tiny faint">← Workspace</Link>
+      {/* Stakeholder-facing: simple draft review. No risk tiers, workflow bars, or routing. */}
+      <StakeholderReview job={job} />
+
+      {/* Admin View only: the full production machinery, collapsed by default. */}
+      {role === "admin" && (
+        <div className="admin-details">
+          <button className="admin-toggle" onClick={() => setAdminOpen((o) => !o)}>
+            {adminOpen ? "▾" : "▸"} Admin view — full production detail (risk, agents, audit, export)
+          </button>
+          {adminOpen && <AdminDetails id={id} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminDetails({ id }: { id: string }) {
+  const job = useJob(id);
+  const [tab, setTab] = useState<Tab>("qa");
+  if (!job) return null;
+
   const report = job.finalQaReport ?? job.qaReport;
   const jobTypeLabel = JOB_TYPES.find((t) => t.value === job.brief.jobType)?.label ?? job.brief.jobType;
   const prod = job.production;
@@ -41,7 +68,7 @@ export function JobWorkspace({ id }: { id: string }) {
   const pim = prod?.problemIntentMap ?? rep?.pim;
 
   return (
-    <div className="content wide">
+    <div style={{ marginTop: 16 }}>
       <div className="page-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
         <div style={{ minWidth: 0 }}>
           <Link href="/contentos" className="tiny faint">← Workspace</Link>

@@ -72,6 +72,7 @@ export function intake(brief: StandardizedBrief, owner: string, ts: string): Orc
 
   const risk = assessRisk(brief);
   job.risk = risk;
+  job.briefConflicts = detectBriefConflicts(brief);
   job.metrics.costUsd += 0.4;
   job.state = "BRIEFED";
   job.updatedAt = ts;
@@ -131,9 +132,43 @@ export function runCreatorAndQA(input: Job, ts: string): OrchestratorResult {
   job.state = "QA_REVIEW_READY";
   audits.push(audit(job, "QA Agent", "qa_complete", `QA complete. Overall ${report.overallScore}/5 · routing: ${report.routing}.`, "QA_RUNNING", "QA_REVIEW_READY"));
 
-  applyRouting(job, report, audits, ts);
+  // The stakeholder previews/edits FIRST. Human review is offered as a
+  // recommendation, never an automatic state transition on the initial pass.
+  recommendReview(job, report);
   job.updatedAt = ts;
   return { job, audits };
+}
+
+/** Compute a non-binding human-review recommendation (no state change). */
+function recommendReview(job: Job, report: QAReport) {
+  const reasons = humanReviewReasons(job, report);
+  const needed = reasons.length > 0 || report.routing === "human_review" || report.routing === "block";
+  job.reviewRecommendation = {
+    needed,
+    reasons,
+    note: needed
+      ? "We recommend routing this for human review before approval — but it's your call."
+      : "This draft looks clear of governance flags. You can submit it for approval when you're happy with it.",
+  };
+}
+
+/** Surface mismatches between the uploaded brief and the submitted intake. */
+function detectBriefConflicts(brief: StandardizedBrief): string[] {
+  const ag = brief.agencyExtract;
+  if (!ag) return [];
+  const conflicts: string[] = [];
+  const selected = new Set((brief.products ?? [brief.product]).filter(Boolean));
+  for (const dp of ag.detectedProducts) {
+    if (dp.mapped && dp.slug && !selected.has(dp.slug)) conflicts.push(`The brief references ${dp.name}, but it wasn't selected as a product. Follow the brief?`);
+  }
+  const recTitle = ag.titleOptions[0]?.title;
+  if (recTitle && brief.title && recTitle.toLowerCase() !== brief.title.toLowerCase() && !brief.title.startsWith("Untitled")) {
+    conflicts.push(`The brief's recommended title ("${recTitle}") differs from the submitted title ("${brief.title}").`);
+  }
+  if (ag.primaryKeyword && brief.seoKeyword && ag.primaryKeyword.toLowerCase() !== brief.seoKeyword.toLowerCase()) {
+    conflicts.push(`The brief's primary keyword ("${ag.primaryKeyword}") differs from the submitted keyword ("${brief.seoKeyword}").`);
+  }
+  return conflicts.slice(0, 4);
 }
 
 /* ------------------------------------------------------------------ */

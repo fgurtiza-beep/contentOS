@@ -32,6 +32,7 @@ import {
   primaryDraft,
   writeDraftBack,
 } from "../orchestrator/contentOrchestrator";
+import { regenerateSectionBody } from "../agents/productionAgent";
 import { assessRisk } from "../orchestrator/riskTiering";
 import { runQAAgent } from "../agents/qaAgent";
 import { gtmStudioProductService } from "../data/gtmStudioProductService";
@@ -261,6 +262,86 @@ export const jobStore = {
     if (job.state === "QA_REVIEW_READY" || job.state === "QA_PASSED") job.state = "CHANGES_PENDING";
     job.updatedAt = now();
     record({ jobId, actor, action: "manual_edit", detail: `Edited ${blk.kind} block directly.`, meta: { blockId } });
+    replaceJob(job);
+  },
+
+  /* ---------------- Stakeholder draft actions ---------------------- */
+
+  /** Regenerate the body of one section (between a heading block and the next). */
+  regenerateSection(jobId: string, headingBlockId: string, actor = "marketing@sprout.ph") {
+    const job = clone(this.getJob(jobId));
+    if (!job || job.lane !== "production") return;
+    const draft = primaryDraft(job);
+    if (!draft) return;
+    const idx = draft.blocks.findIndex((b) => b.id === headingBlockId);
+    if (idx < 0) return;
+    const heading = draft.blocks[idx].text;
+    // Span = paragraph/list/cta blocks until the next heading.
+    let end = idx + 1;
+    while (end < draft.blocks.length && !["h1", "h2", "h3"].includes(draft.blocks[end].kind)) end++;
+    const newParas = regenerateSectionBody(job.brief, heading, now());
+    if (newParas.length === 0) return;
+    const newBlocks = newParas.map((text, i) => ({ id: nextId("blk"), order: draft.blocks[idx].order + i + 1, kind: "paragraph" as const, text }));
+    draft.blocks = [...draft.blocks.slice(0, idx + 1), ...newBlocks, ...draft.blocks.slice(end)];
+    draft.blocks.forEach((b, i) => (b.order = i));
+    pushVersion(draft, "user_approved", actor);
+    writeDraftBack(job, draft);
+    if (job.state === "QA_PASSED") job.state = "CHANGES_PENDING";
+    job.updatedAt = now();
+    record({ jobId, actor, action: "regenerate_section", detail: `Regenerated section "${heading.slice(0, 60)}" from the brief.` });
+    replaceJob(job);
+  },
+
+  /** Append a new section (heading + brief-derived body) before the CTA. */
+  appendSection(jobId: string, heading: string, actor = "marketing@sprout.ph") {
+    const job = clone(this.getJob(jobId));
+    if (!job || job.lane !== "production") return;
+    const draft = primaryDraft(job);
+    if (!draft) return;
+    const clean = heading.replace(/^h[1-3]:?\s*/i, "").trim();
+    const body = regenerateSectionBody(job.brief, heading, now());
+    const ctaIdx = draft.blocks.findIndex((b) => b.kind === "cta");
+    const insertAt = ctaIdx >= 0 ? ctaIdx : draft.blocks.length;
+    const newBlocks = [
+      { id: nextId("blk"), order: 0, kind: "h2" as const, text: clean },
+      ...body.map((text) => ({ id: nextId("blk"), order: 0, kind: "paragraph" as const, text })),
+    ];
+    draft.blocks = [...draft.blocks.slice(0, insertAt), ...newBlocks, ...draft.blocks.slice(insertAt)];
+    draft.blocks.forEach((b, i) => (b.order = i));
+    pushVersion(draft, "user_approved", actor);
+    writeDraftBack(job, draft);
+    if (job.state === "QA_PASSED") job.state = "CHANGES_PENDING";
+    job.updatedAt = now();
+    record({ jobId, actor, action: "append_section", detail: `Added section "${clean.slice(0, 60)}".` });
+    replaceJob(job);
+  },
+
+  /** Append a stakeholder comment to the draft. */
+  addDraftComment(jobId: string, text: string, author = "marketing@sprout.ph") {
+    const job = clone(this.getJob(jobId));
+    if (!job || !text.trim()) return;
+    job.draftComments = [...(job.draftComments ?? []), { at: now(), author, text: text.trim() }];
+    job.updatedAt = now();
+    record({ jobId, actor: author, action: "draft_comment", detail: text.trim().slice(0, 80) });
+    replaceJob(job);
+  },
+
+  /** Stakeholder routes the draft onward — approval / human review is a USER action. */
+  submitForApproval(jobId: string, actor = "marketing@sprout.ph") {
+    const job = clone(this.getJob(jobId));
+    if (!job) return;
+    const from = job.state;
+    job.humanReview = job.humanReview ?? {
+      reasons: job.reviewRecommendation?.reasons ?? [],
+      assignedReviewer: "Unassigned",
+      productReviewNeeded: job.metrics.productClaimFailures > 0,
+      legalReviewNeeded: !!job.brief.regulatory?.legalReviewNeeded,
+      commsReviewNeeded: false,
+      comments: (job.draftComments ?? []).map((c) => ({ at: c.at, author: c.author, text: c.text })),
+    };
+    job.state = "HUMAN_REVIEW";
+    job.updatedAt = now();
+    record({ jobId, actor, action: "submit_for_approval", detail: "Stakeholder submitted the draft for approval / human review.", fromState: from, toState: "HUMAN_REVIEW" });
     replaceJob(job);
   },
 
