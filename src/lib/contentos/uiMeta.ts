@@ -27,4 +27,5 @@ export const TYPE_META: Record<JobType, TypeMeta> = {
   convert_external_report: { icon: "📊", desc: "From third-party research", outputSize: "Multi-channel set", effort: "8–12 min setup", cta: "Convert Report", amountOptions: [3, 5, 10] },
   convert_regulatory_update: { icon: "⚖️", desc: "Employer guidance from a regulation", outputSize: "Guidance + posts", effort: "10–15 min setup", cta: "Convert Update", amountOptions: [2, 3, 5] },
   reframe_competitor_pov: { icon: "🎯", desc: "Differentiation narrative", outputSize: "Multi-channel set", effort: "8–12 min setup", cta: "Reframe POV", amountOptions: [2, 3, 5] },
+  transcribe_video: { icon: "🎬", desc: "Transcript, chapters & key takeaways from a video", outputSize: "Full transcript + summary", effort: "2–5 min setup", cta: "Transcribe Video", amountOptions: [1] },
 };

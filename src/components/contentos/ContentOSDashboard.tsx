@@ -48,16 +48,23 @@ export function ContentOSDashboard() {
       </div>
 
       <div className="panel" style={{ maxWidth: 560 }}>
-        <div className="panel-head"><h3>Notifications</h3><span className="sub">recent activity</span></div>
+        <div className="panel-head"><h3>Notifications</h3></div>
         <div className="panel-pad">
           {notifications.length === 0 && <div className="faint tiny">No recent activity.</div>}
+          {notifications.length > 0 && (
+            <div className="notif-cols">
+              <span>recent activity</span>
+              <span>status</span>
+            </div>
+          )}
           {notifications.map((nf, i) => (
             <div key={i} className="notif">
               <div className="ni">{nf.icon}</div>
-              <div>
+              <div className="notif-body">
                 <div className="nt">{nf.text}</div>
                 <div className="ns">{nf.when}</div>
               </div>
+              <span className={`notif-tag ${nf.tagCls}`}>{nf.tag}</span>
             </div>
           ))}
         </div>
@@ -66,16 +73,16 @@ export function ContentOSDashboard() {
   );
 }
 
-function buildNotifications(audits: AuditEntry[], jobs: Job[]): { icon: string; text: string; when: string }[] {
+function buildNotifications(audits: AuditEntry[], jobs: Job[]): { icon: string; text: string; when: string; tag: string; tagCls: string }[] {
   const titleFor = (id: string) => jobs.find((j) => j.id === id)?.brief.title ?? "A job";
-  const WATCH: Record<string, { icon: string; verb: string }> = {
-    review_approve: { icon: "✅", verb: "approved" },
-    qa_passed: { icon: "🎯", verb: "passed QA" },
-    export: { icon: "📤", verb: "exported" },
-    export_override: { icon: "📤", verb: "exported (override)" },
-    review_kill: { icon: "🛑", verb: "killed" },
-    qa_complete: { icon: "✓", verb: "completed QA" },
-    route_human: { icon: "⚑", verb: "routed to human review" },
+  const WATCH: Record<string, { icon: string; verb: string; tag: string; tagCls: string }> = {
+    review_approve: { icon: "✅", verb: "approved",              tag: "Approved",      tagCls: "approved"      },
+    qa_passed:      { icon: "🎯", verb: "passed QA",            tag: "QA Passed",     tagCls: "done-qa"       },
+    export:         { icon: "📤", verb: "exported",             tag: "Exported",      tagCls: "exported"      },
+    export_override:{ icon: "📤", verb: "exported (override)",  tag: "Exported",      tagCls: "exported"      },
+    review_kill:    { icon: "🛑", verb: "killed",               tag: "Killed",        tagCls: "killed"        },
+    qa_complete:    { icon: "✓",  verb: "completed QA",         tag: "Done QA",       tagCls: "done-qa"       },
+    route_human:    { icon: "⚑",  verb: "routed to human review", tag: "Human Review", tagCls: "human-review" },
   };
   return [...audits]
     .filter((a) => WATCH[a.action] && jobs.some((j) => j.id === a.jobId))
@@ -85,5 +92,7 @@ function buildNotifications(audits: AuditEntry[], jobs: Job[]): { icon: string; 
       icon: WATCH[a.action].icon,
       text: `${titleFor(a.jobId)} ${WATCH[a.action].verb}`,
       when: new Date(a.at).toLocaleString(),
+      tag: WATCH[a.action].tag,
+      tagCls: WATCH[a.action].tagCls,
     }));
 }
