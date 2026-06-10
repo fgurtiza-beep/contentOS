@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useJobs, useAudits } from "@/lib/contentos/store/useStore";
 import { CURRENT_USER } from "@/lib/contentos/store/uiStore";
 import { isMyJob } from "@/lib/contentos/jobStage";
+import { TrendSignalWidget } from "./TrendSignalPanel";
 import type { AuditEntry, Job } from "@/lib/contentos/schemas/contentos";
 
 export function ContentOSDashboard() {
@@ -36,6 +37,8 @@ export function ContentOSDashboard() {
         </div>
         <button className="btn primary" onClick={() => router.push("/contentos/intake")}>＋ New Content Job</button>
       </div>
+
+      <TrendSignalWidget />
 
       <div className="attn-center" style={{ marginBottom: 20 }}>
         {cards.map((c) => (

@@ -28,6 +28,11 @@ export function ExportPanel({ job }: { job: Job }) {
             <select value={format} onChange={(e) => setFormat(e.target.value as ExportFormat)}>
               {EXPORT_FORMATS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
             </select>
+            {format === "content_calendar_csv" && (
+              <div className="callout" style={{ marginTop: 8, fontSize: 12 }}>
+                <strong>HubSpot Social compatible.</strong> Columns match HubSpot&apos;s bulk scheduling import format (Account, Date, Message, Link, Photo URL, Campaign). The <code>Date</code> column is left blank — fill it in as <code>mm/dd/yy hh:mm</code> before uploading. Update the <code>Account</code> column with your actual connected HubSpot account name (e.g. <em>Sprout Solutions - LinkedIn Page</em>).
+              </div>
+            )}
           </div>
 
           {!gate.allowed && (

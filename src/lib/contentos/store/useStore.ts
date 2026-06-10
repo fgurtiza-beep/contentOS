@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { jobStore } from "./jobStore";
+import { trendStore } from "./trendStore";
 import type { Job, AuditEntry } from "../schemas/contentos";
 
 /** Subscribe a component to the whole store snapshot. */
@@ -23,4 +24,8 @@ export function useAudits(): AuditEntry[] {
   return useStore().audits;
 }
 
-export { jobStore };
+export function useTrendStore() {
+  return useSyncExternalStore(trendStore.subscribe, trendStore.getSnapshot, trendStore.getSnapshot);
+}
+
+export { jobStore, trendStore };

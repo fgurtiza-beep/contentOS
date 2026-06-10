@@ -1,9 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import type { ReactNode } from "react";
 import { useJobs, jobStore } from "@/lib/contentos/store/useStore";
-import type { ClipApprovalEntry, ClipType, EditorBrief, Job } from "@/lib/contentos/schemas/contentos";
+import type { ClipApprovalEntry, ClipType, Job } from "@/lib/contentos/schemas/contentos";
 
 const REVIEWER = "marketing@sprout.ph";
 
@@ -42,33 +41,20 @@ function ClipTypeBadge({ type }: { type: ClipType }) {
   );
 }
 
-function downloadBlob(filename: string, content: string, mime: string) {
-  const blob = new Blob([content], { type: mime });
-  const url  = URL.createObjectURL(blob);
-  const a    = Object.assign(document.createElement("a"), { href: url, download: filename });
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
 // ---------------------------------------------------------------------------
-// Queue root
+// Queue root (standalone page — also embedded as section in HumanReviewQueue)
 // ---------------------------------------------------------------------------
 
 export function ClipApprovalQueue() {
   const jobs   = useJobs();
   const [openRef, setOpenRef] = useState<OpenRef | null>(null);
 
-  // Pending items — shown in the card grid
   const pendingItems: QueueItem[] = jobs.flatMap((j) =>
     (j.clipApprovalQueue ?? [])
       .filter((e) => e.status === "pending")
       .map((e) => ({ job: j, entry: e })),
   );
 
-  // Resolve open item from ALL entries (including post-approval) so the detail
-  // panel stays visible after approval and can show the generated brief.
   const openItem: QueueItem | null = openRef
     ? (() => {
         const job   = jobs.find((j) => j.id === openRef.jobId);
@@ -84,9 +70,9 @@ export function ClipApprovalQueue() {
         <p>
           {openItem
             ? openItem.entry.status === "approved"
-              ? "Clip approved. Editor brief generated below — download Markdown or PDF."
+              ? "Clip approved — editor brief updated. View it in Job Workspace → Agent outputs."
               : "Review the clip, adjust timestamps if needed, then approve or reject."
-            : `Clean clip candidates awaiting sign-off. Approved clips route to EditorBriefAgent. ${pendingItems.length} pending.`}
+            : `Clean clip candidates awaiting sign-off. ${pendingItems.length} pending.`}
         </p>
       </div>
 
@@ -113,11 +99,13 @@ export function ClipApprovalQueue() {
   );
 }
 
+export type { QueueItem };
+
 // ---------------------------------------------------------------------------
 // Queue card
 // ---------------------------------------------------------------------------
 
-function ClipCard({ item, onOpen }: { item: QueueItem; onOpen: () => void }) {
+export function ClipCard({ item, onOpen }: { item: QueueItem; onOpen: () => void }) {
   const { job, entry } = item;
   const c = entry.candidate;
   return (
@@ -149,7 +137,7 @@ function ClipCard({ item, onOpen }: { item: QueueItem; onOpen: () => void }) {
 // Detail panel
 // ---------------------------------------------------------------------------
 
-function ClipDetail({ item, onBack }: { item: QueueItem; onBack: () => void }) {
+export function ClipDetail({ item, onBack }: { item: QueueItem; onBack: () => void }) {
   const { job, entry } = item;
   const c = entry.candidate;
 
@@ -162,7 +150,6 @@ function ClipDetail({ item, onBack }: { item: QueueItem; onBack: () => void }) {
   const isRejected = entry.status === "rejected";
 
   function handleApprove() {
-    // Don't navigate away — stay in the detail so the brief appears immediately.
     jobStore.clipApprove(job.id, entry.id, REVIEWER);
   }
 
@@ -176,18 +163,24 @@ function ClipDetail({ item, onBack }: { item: QueueItem; onBack: () => void }) {
     setEditingTs(false);
   }
 
+  const approvedCount = (job.clipApprovalQueue ?? []).filter((e) => e.status === "approved").length;
+
   return (
     <>
       <button className="btn ghost sm" onClick={onBack} style={{ marginBottom: 12 }}>
         ← Back to queue
       </button>
 
-      {/* Brief panel sits above the detail split when the clip is approved */}
-      {isApproved && entry.editorBrief && (
-        <EditorBriefPanel brief={entry.editorBrief} jobTitle={job.brief.title} />
+      {isApproved && (
+        <div className="callout" style={{ marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <b>Editor brief updated.</b> This clip is now part of the sequence ({approvedCount} clip{approvedCount !== 1 ? "s" : ""} approved).
+            {" "}View the full brief in <b>Job Workspace → Agent outputs</b>.
+          </div>
+        </div>
       )}
 
-      <div className="qa-split" style={{ marginTop: isApproved ? 24 : 0 }}>
+      <div className="qa-split">
         {/* LEFT — clip content */}
         <div className="panel">
           <div className="panel-head">
@@ -304,7 +297,7 @@ function ClipDetail({ item, onBack }: { item: QueueItem; onBack: () => void }) {
                   Edit timestamps
                 </button>
                 <div className="faint tiny" style={{ marginTop: 8, lineHeight: 1.5 }}>
-                  Approving runs EditorBriefAgent and generates a one-page brief with Markdown + PDF exports.
+                  Approving adds this clip to the sequence and regenerates the job-level editor brief.
                 </div>
               </div>
             </>
@@ -326,145 +319,4 @@ function ClipDetail({ item, onBack }: { item: QueueItem; onBack: () => void }) {
       </div>
     </>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Editor Brief Panel
-// ---------------------------------------------------------------------------
-
-function EditorBriefPanel({ brief, jobTitle }: { brief: EditorBrief; jobTitle: string }) {
-  const [activeTab, setActiveTab] = useState<"preview" | "markdown">("preview");
-
-  const slugTitle = jobTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  const mdFilename  = `editor-brief-${brief.clipId}-${slugTitle}.md`;
-  const pdfFilename = `editor-brief-${brief.clipId}-${slugTitle}.html`;
-
-  return (
-    <div className="panel" style={{ borderLeft: "4px solid var(--green)" }}>
-      <div className="panel-head">
-        <div>
-          <span style={{ fontSize: 14, fontWeight: 700 }}>Editor Brief generated</span>
-          <span className="sub" style={{ marginLeft: 8 }}>
-            {brief.inPoint} – {brief.outPoint} · {fmtDur(brief.durationSec)}
-          </span>
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn sm" onClick={() => downloadBlob(mdFilename, brief.markdownExport, "text/markdown")}>
-            ↓ Markdown
-          </button>
-          <button className="btn sm" onClick={() => downloadBlob(pdfFilename, brief.pdfHtmlExport, "text/html")}>
-            ↓ PDF (HTML)
-          </button>
-        </div>
-      </div>
-
-      <div style={{ borderBottom: "1px solid var(--border)", display: "flex", gap: 0 }}>
-        {(["preview", "markdown"] as const).map((t) => (
-          <button key={t} className={`tab ${activeTab === t ? "active" : ""}`}
-            style={{ padding: "8px 16px", fontSize: 12 }} onClick={() => setActiveTab(t)}>
-            {t === "preview" ? "Brief preview" : "Markdown source"}
-          </button>
-        ))}
-      </div>
-
-      <div style={{ padding: "16px 20px" }}>
-        {activeTab === "preview" ? (
-          <BriefPreview brief={brief} />
-        ) : (
-          <pre style={{
-            fontFamily: "monospace", fontSize: 12, lineHeight: 1.6,
-            whiteSpace: "pre-wrap", color: "var(--text)", margin: 0,
-            background: "var(--bg-subtle)", padding: 16, borderRadius: 6,
-            maxHeight: 520, overflowY: "auto",
-          }}>
-            {brief.markdownExport}
-          </pre>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function BriefPreview({ brief }: { brief: EditorBrief }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16, fontSize: 13 }}>
-      {/* Timestamps row */}
-      <div style={{ display: "flex", gap: 32, flexWrap: "wrap" }}>
-        <div><div className="tiny" style={{ color: "var(--text-muted)", marginBottom: 2 }}>IN POINT</div>
-          <code style={{ fontSize: 15, fontWeight: 700 }}>{brief.inPoint}</code></div>
-        <div><div className="tiny" style={{ color: "var(--text-muted)", marginBottom: 2 }}>OUT POINT</div>
-          <code style={{ fontSize: 15, fontWeight: 700 }}>{brief.outPoint}</code></div>
-        <div><div className="tiny" style={{ color: "var(--text-muted)", marginBottom: 2 }}>DURATION</div>
-          <code style={{ fontSize: 15, fontWeight: 700 }}>{fmtDur(brief.durationSec)}</code></div>
-      </div>
-
-      <BriefSection label="Clip Angle">{brief.clipAngle}</BriefSection>
-      <BriefSection label="Strategic Description">{brief.strategicDescription}</BriefSection>
-
-      <div>
-        <div className="tiny" style={{ color: "var(--text-muted)", marginBottom: 6, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-          Recommended Text Overlay
-        </div>
-        <div style={{ background: "var(--ubas-soft)", borderLeft: "3px solid var(--ubas)", padding: "10px 14px", borderRadius: 4, whiteSpace: "pre-wrap", fontStyle: "italic" }}>
-          {brief.textOverlay}
-        </div>
-      </div>
-
-      <div>
-        <div className="tiny" style={{ color: "var(--text-muted)", marginBottom: 6, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-          Caption Draft
-        </div>
-        <pre style={{ fontFamily: "inherit", whiteSpace: "pre-wrap", background: "var(--bg-subtle)", border: "1px solid var(--border)", borderRadius: 6, padding: "10px 14px", fontSize: 12.5, lineHeight: 1.6, margin: 0, maxHeight: 180, overflowY: "auto" }}>
-          {brief.captionDraft}
-        </pre>
-      </div>
-
-      <div>
-        <div className="tiny" style={{ color: "var(--text-muted)", marginBottom: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-          Platform Specs
-        </div>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          {brief.platformSpecs.map((ps) => (
-            <div key={ps.platform} style={{ flex: 1, minWidth: 220, border: "1px solid var(--border)", borderRadius: 8, padding: "12px 14px" }}>
-              <div style={{ fontWeight: 700, marginBottom: 8 }}>{ps.platform}</div>
-              <dl className="kv tiny">
-                <dt>Aspect ratio</dt><dd><code>{ps.aspectRatio}</code></dd>
-                <dt>Format</dt><dd>{ps.format}</dd>
-                <dt>Max duration</dt><dd>{ps.maxDurationSec}s</dd>
-                <dt>Caption limit</dt><dd>{ps.captionCharLimit} chars</dd>
-                <dt>Notes</dt><dd style={{ color: "var(--text-muted)" }}>{ps.notes}</dd>
-              </dl>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div>
-        <div className="tiny" style={{ color: "var(--text-muted)", marginBottom: 6, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-          CTA Instruction
-        </div>
-        <div style={{ background: "#e6fce0", borderLeft: "3px solid var(--green)", padding: "10px 14px", borderRadius: 4 }}>
-          {brief.ctaInstruction}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function BriefSection({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div>
-      <div className="tiny" style={{ color: "var(--text-muted)", marginBottom: 4, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-        {label}
-      </div>
-      <div style={{ color: "var(--text)", lineHeight: 1.6 }}>{children}</div>
-    </div>
-  );
-}
-
-function fmtDur(sec: number): string {
-  if (sec < 60) return `${sec}s`;
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
