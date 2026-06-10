@@ -15,6 +15,7 @@ import {
   type JobType,
   type StandardizedBrief,
   type AgencyBriefExtract,
+  type VideoSourceType,
 } from "@/lib/contentos/schemas/contentos";
 import { TYPE_META } from "@/lib/contentos/uiMeta";
 import { gtmStudioProductService } from "@/lib/contentos/data/gtmStudioProductService";
@@ -63,12 +64,12 @@ export function JobIntakeForm() {
       <div className="wiz-crumb">
         <button className={`seg ${step === "lane" ? "current" : "done"}`} onClick={() => setStep("lane")}>1 · Workflow</button>
         {lane && <span className="arrow">›</span>}
-        {lane && <button className={`seg ${step === "type" ? "current" : "done"}`} onClick={() => setStep("type")}>{lane === "repurposing" ? "Content Repurposing" : "New Content"}</button>}
+        {lane && <button className={`seg ${step === "type" ? "current" : "done"}`} onClick={() => setStep("type")}>{lane === "repurposing" ? "Content Repurposing" : lane === "video_intelligence" ? "Video Intelligence" : "New Content"}</button>}
         {jobType && step === "brief" && (<><span className="arrow">›</span><span className="seg current">{JOB_TYPES.find((t) => t.value === jobType)?.label}</span></>)}
       </div>
 
       {step === "lane" && (
-        <div className="choice-grid two">
+        <div className="choice-grid three">
           <button className="choice" onClick={() => { setLane("production"); setJobType(null); setStep("type"); }}>
             <div className="ci">✦</div><div className="ct">New Content</div>
             <div className="cd">Create net-new content from a structured brief — blogs, ebooks, social, email, landing pages, and more.</div>
@@ -77,6 +78,12 @@ export function JobIntakeForm() {
           <button className="choice repurpose" onClick={() => { setLane("repurposing"); setJobType(null); setStep("type"); }}>
             <div className="ci">♺</div><div className="ct">Content Repurposing</div>
             <div className="cd">Transform one approved source asset into channel-native derivatives, following IMD 2.0 doctrine.</div>
+            <div className="cgo">Select →</div>
+          </button>
+          <button className="choice video" onClick={() => { setLane("video_intelligence"); setJobType("transcribe_video"); setStep("brief"); }}>
+            <div className="ci">🎬</div>
+            <div className="ct">Video Intelligence</div>
+            <div className="cd">Extract a cleaned transcript, timestamped chapters, executive summary, and key takeaways from any video.</div>
             <div className="cgo">Select →</div>
           </button>
         </div>
@@ -129,6 +136,7 @@ interface BlogItem { title: string; notes: string; }
 
 function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLane; onDone: (ids: string[]) => void }) {
   const isRepurpose = lane === "repurposing";
+  const isVideoIntel = lane === "video_intelligence";
   const isRegulatory = jobType === "convert_regulatory_update";
   const isCompetitorType = jobType === "reframe_competitor_pov";
   const isBlog = jobType === "blog";
@@ -172,6 +180,7 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
   // ---- Repurpose / addenda ----
   const [a, setA] = useState({
     srcTitle: "", srcType: "report", srcUrl: "", srcContent: "", srcApproved: true,
+    vidTitle: "", vidUrl: "", vidUrlType: "youtube" as VideoSourceType, vidTranscript: "",
     issuingBody: "DOLE", effectiveDate: "", legalReviewNeeded: true,
     competitorName: "", allowedToName: false, differentiationPillars: "",
     mustCite: true, requiredSources: "",
@@ -264,20 +273,25 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
 
   const errors = useMemo(() => {
     const e: Record<string, string> = {};
+    if (isVideoIntel) {
+      if (!a.vidTranscript.trim() && !a.vidUrl.trim()) e.video = "Add a video URL or paste a transcript.";
+      return e;
+    }
     if (!title.trim() && !isMulti) e.title = "Add a title or main topic.";
     if (painList.length === 0) e.pains = "Add at least one pain point.";
     if (goalSel.length === 0) e.goals = "Choose at least one goal.";
     if (isMulti && items.some((it) => !it.title.trim())) e.items = `Give each ${unitLabel} a topic.`;
     return e;
-  }, [title, isMulti, painList.length, goalSel.length, items, unitLabel]);
+  }, [isVideoIntel, a.vidTranscript, a.vidUrl, title, isMulti, painList.length, goalSel.length, items, unitLabel]);
   const valid = Object.keys(errors).length === 0;
 
   /* ------------------------------ Submit --------------------------------- */
 
   const desiredOutputs = useMemo(() => {
     if (isRepurpose) return REPURPOSE_CHANNELS.filter((c) => a.channelQtys[c] > 0).map((c) => ({ channel: c, format: c === "Email" ? "newsletter" : c === "Blog" ? "blog" : "post", quantity: a.channelQtys[c] }));
+    if (isVideoIntel) return [{ channel: "video_intelligence", format: "transcript_analysis", quantity: 1 }];
     return [{ channel: jobType, format: jobType, quantity: amount }];
-  }, [isRepurpose, a.channelQtys, amount, jobType]);
+  }, [isRepurpose, isVideoIntel, a.channelQtys, amount, jobType]);
 
   function buildAgencyExtract(): AgencyBriefExtract | undefined {
     const e = extracted?.agency;
@@ -330,7 +344,7 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
       jobType,
       primaryICP, secondaryICPs: [], industry, segment: companySize,
       persona, readiness: "problem_aware", contentIntent,
-      tone, length: extracted?.agency?.wordCount || m.outputSize, channel: isRepurpose ? desiredOutputs[0]?.channel ?? "LinkedIn" : jobType,
+      tone, length: extracted?.agency?.wordCount || m.outputSize, channel: isVideoIntel ? "video_intelligence" : isRepurpose ? desiredOutputs[0]?.channel ?? "LinkedIn" : jobType,
       mustInclude: splitList(mustInclude), mustAvoid: splitList(mustAvoid),
       product: realProducts[0] ?? "", products: realProducts,
       contentFormat: isBlog ? contentFormat : undefined,
@@ -347,8 +361,9 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
       painPoints: painList,
       complianceContext: "",
       sourceAsset: isRepurpose ? { id: "src_" + Date.now().toString(36), title: a.srcTitle || "Source asset", origin: isRegulatory ? "regulatory" : isCompetitorType ? "competitor" : "sprout", assetType: a.srcType, url: a.srcUrl, content: a.srcContent || "Source content pending.", approved: a.srcApproved } : null,
+      videoSource: isVideoIntel ? { id: "vid_" + Date.now().toString(36), title: a.vidTitle || title || "Video", url: a.vidUrl, urlType: a.vidUrlType, transcript: a.vidTranscript } : null,
       landingPageType: jobType === "landing_page" ? "campaign" : "",
-      datasets: [], desiredOutputs, volumeTarget: String(isRepurpose ? desiredOutputs.reduce((acc, o) => acc + o.quantity, 0) : amount), riskSensitivity: "low",
+      datasets: [], desiredOutputs, volumeTarget: isVideoIntel ? "1" : String(isRepurpose ? desiredOutputs.reduce((acc, o) => acc + o.quantity, 0) : amount), riskSensitivity: "low",
       regulatory: isRegulatory ? { issuingBody: a.issuingBody, effectiveDate: a.effectiveDate, affectedAudience: "", uncertaintyAreas: "", legalReviewNeeded: a.legalReviewNeeded, sproutCTAAllowed: true } : undefined,
       competitorAddendum: isCompetitorType || competitorForBrief ? { competitorName: a.competitorName || competitorForBrief, allowedToNameCompetitor: a.allowedToName, comparisonsPermitted: false, differentiationPillars: splitList(a.differentiationPillars), prohibitedClaims: ["pricing", "security", "uptime"] } : undefined,
       research: jobType === "convert_external_report" ? { mustCite: a.mustCite, directQuotesAllowed: false, dataMisrepresentationRisks: "", requiredSources: splitList(a.requiredSources) } : undefined,
@@ -375,7 +390,7 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
   return (
     <div className="builder" style={{ maxWidth: 720 }}>
       {/* ===== Upload / paste / manual ===== */}
-      {!isRepurpose && (
+      {!isRepurpose && !isVideoIntel && (
         <>
           <div
             className={`upload-zone ${dragOver ? "drag" : ""} ${extracting ? "busy" : ""}`}
@@ -435,7 +450,39 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
           <div className="field"><label>Title options <span className="hint">· from the brief · primary = Title above</span></label><EditableList items={titleOptions} onChange={setTitleOptions} placeholder="Add an alternate title" /></div>
         )}
 
-        {!isRepurpose && (
+        {isVideoIntel && (
+          <div className="callout" style={{ marginTop: 8 }}>
+            <b>Video source</b>
+            <div className="row" style={{ marginTop: 8 }}>
+              <div className="field">
+                <label>Source type</label>
+                <select value={a.vidUrlType} onChange={(e) => setAk("vidUrlType", e.target.value as VideoSourceType)}>
+                  <option value="youtube">YouTube</option>
+                  <option value="loom">Loom</option>
+                  <option value="vimeo">Vimeo</option>
+                  <option value="transcript_upload">Upload transcript</option>
+                </select>
+              </div>
+              <div className="field">
+                <label>Video title <span className="hint">· title of the source video</span></label>
+                <input type="text" value={a.vidTitle} onChange={(e) => setAk("vidTitle", e.target.value)} placeholder="e.g. Product demo — Q2 2026" />
+              </div>
+            </div>
+            {a.vidUrlType !== "transcript_upload" && (
+              <div className="field">
+                <label>Video URL</label>
+                <input type="text" value={a.vidUrl} onChange={(e) => setAk("vidUrl", e.target.value)} placeholder={a.vidUrlType === "youtube" ? "https://youtube.com/watch?v=..." : a.vidUrlType === "loom" ? "https://www.loom.com/share/..." : "https://vimeo.com/..."} />
+              </div>
+            )}
+            <div className="field">
+              <label>Transcript <span className="hint">· paste auto-generated captions or an uploaded .txt / .srt file</span></label>
+              <textarea rows={8} value={a.vidTranscript} onChange={(e) => setAk("vidTranscript", e.target.value)} placeholder="Paste the video transcript here…" />
+            </div>
+            {err("video")}
+          </div>
+        )}
+
+        {!isRepurpose && !isVideoIntel && (
           <div className="field"><label>How many {unitLabel}s?</label><Stepper value={amount} min={1} max={maxQty} onChange={changeAmount} /></div>
         )}
         {isRepurpose && (
@@ -471,6 +518,7 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
         )}
       </div>
 
+      {!isVideoIntel && (<>
       {/* ===== Audience ===== */}
       <div className="form-block">
         <div className="block-title">2 · Audience</div>
@@ -517,6 +565,7 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
           )}
         </div>
       </div>
+      </>)}
 
       {/* ===== Additional guidance (optional, collapsed) ===== */}
       <AccordionSection num={4} title="Additional guidance" hint="optional — most requests don't need this">
@@ -542,7 +591,7 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
       </AccordionSection>
 
       <div className="actionbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div className="tiny faint">{valid ? "Ready to submit." : "Title, pain points and a goal are required."}</div>
+        <div className="tiny faint">{isVideoIntel ? "Paste the transcript, then submit." : valid ? "Ready to submit." : "Title, pain points and a goal are required."}</div>
         <button className="btn primary accept-all" onClick={submit}>{isMulti ? `Submit ${amount} ${unitLabel}s →` : "Submit to ContentOS →"}</button>
       </div>
     </div>

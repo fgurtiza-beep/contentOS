@@ -27,6 +27,9 @@ import { MAX_REVISION_ATTEMPTS, laneForJobType } from "../schemas/contentos";
 import { assessRisk } from "./riskTiering";
 import { runProductionAgent } from "../agents/productionAgent";
 import { runRepurposingAgent, RepurposingError } from "../agents/repurposingAgent";
+import { runVideoTranscriptAgent, VideoTranscriptError } from "../agents/videoTranscriptAgent";
+import { runClipDiscoveryAgent } from "../agents/clipDiscoveryAgent";
+import { runEditorBriefAgent } from "../agents/editorBriefAgent";
 import { runQAAgent } from "../agents/qaAgent";
 import { nextId, now, nowMs } from "../util";
 import type { HumanReviewKind } from "../schemas/contentos";
@@ -100,8 +103,48 @@ export function runCreatorAndQA(input: Job, ts: string): OrchestratorResult {
       audits.push(audit(job, "Production Agent", "narrative", "Canonical Narrative ready.", "PIM_READY", "NARRATIVE_READY"));
       audits.push(audit(job, "Production Agent", "blueprint", "Content Blueprint ready.", "NARRATIVE_READY", "BLUEPRINT_READY"));
       audits.push(audit(job, "Production Agent", "draft", "Draft generated.", "BLUEPRINT_READY", "DRAFTED"));
+    } else if (job.lane === "video_intelligence") {
+      // Stage 1: Video Transcript Agent
+      const transcriptOut = timed(job, "video_transcript_agent", () => runVideoTranscriptAgent(job.brief, tier, ts));
+      job.videoTranscript = transcriptOut;
+      draft = transcriptOut.draft;
+      audits.push(audit(job, "Video Transcript Agent", "ingest", `Video source ingested: ${transcriptOut.videoSource.urlType} · ${transcriptOut.chapters.length} chapters detected.`, "BRIEFED", "PIM_READY"));
+      audits.push(audit(job, "Video Transcript Agent", "transcript", "Transcript cleaned and segmented.", "PIM_READY", "NARRATIVE_READY"));
+      audits.push(audit(job, "Video Transcript Agent", "analysis", `Executive summary and ${transcriptOut.keyTakeaways.length} key takeaway topics ready.`, "NARRATIVE_READY", "BLUEPRINT_READY"));
+      audits.push(audit(job, "Video Transcript Agent", "draft", "Video intelligence report assembled.", "BLUEPRINT_READY", "DRAFTED"));
+
+      // Stage 2: Clip Discovery Agent — uses transcript output as direct input
+      const clipsOut = timed(job, "clip_discovery_agent", () => runClipDiscoveryAgent(transcriptOut, job.brief, tier, ts));
+      job.clipDiscovery = clipsOut;
+      job.metrics.costUsd += 0.4;
+      audits.push(audit(job, "Clip Discovery Agent", "discover", `${clipsOut.candidates.length} clip candidates ranked across ${transcriptOut.chapters.length} chapters.`));
+
+      // Route flagged clips → Human Review Queue
+      if (clipsOut.flaggedCandidates.length > 0) {
+        job.humanReview = job.humanReview ?? blankTicket();
+        if (!job.humanReview.reasons.includes("flagged_clip_content")) {
+          job.humanReview.reasons.push("flagged_clip_content");
+        }
+        job.humanReview.productReviewNeeded = job.humanReview.productReviewNeeded
+          || clipsOut.flaggedCandidates.some((c) => c.riskFlag?.reasons.includes("product_claim"));
+        job.humanReview.legalReviewNeeded = job.humanReview.legalReviewNeeded
+          || clipsOut.flaggedCandidates.some((c) => c.riskFlag?.reasons.includes("regulatory_language"));
+        audits.push(audit(job, "Clip Discovery Agent", "route_flagged", `${clipsOut.flaggedCandidates.length} clip(s) flagged → Human Review Queue (product/regulatory signals).`));
+      }
+
+      // Route clean clips → Clip Approval Queue
+      if (clipsOut.cleanCandidates.length > 0) {
+        job.clipApprovalQueue = clipsOut.cleanCandidates.map((c) => ({
+          id: nextId("cap"),
+          clipId: c.id,
+          candidate: c,
+          submittedAt: ts,
+          status: "pending" as const,
+        }));
+        audits.push(audit(job, "Clip Discovery Agent", "route_clean", `${clipsOut.cleanCandidates.length} clean clip(s) → Clip Approval Queue.`));
+      }
     } else {
-      const out = timed(job, "repurposing_agent", () => runRepurposingAgent(job.brief, tier, ts));
+      const out = timed(job, "repurposing_agent", () => runRepurposingAgent(job.brief, tier, ts, job.videoTranscript));
       job.repurposing = out;
       draft = out.derivatives[0] ?? emptyDraft();
       audits.push(audit(job, "Repurposing Agent", "classify", `Source classified: ${out.sourceClassification.origin}/${out.sourceClassification.type}.`, "BRIEFED", "PIM_READY"));
@@ -116,6 +159,12 @@ export function runCreatorAndQA(input: Job, ts: string): OrchestratorResult {
       job.updatedAt = ts;
       return { job, audits };
     }
+    if (e instanceof VideoTranscriptError) {
+      job.state = "HELD";
+      audits.push(audit(job, "Orchestrator", "held", `Video transcript blocked: ${e.message}`, "BRIEFED", "HELD"));
+      job.updatedAt = ts;
+      return { job, audits };
+    }
     throw e;
   }
 
@@ -125,7 +174,10 @@ export function runCreatorAndQA(input: Job, ts: string): OrchestratorResult {
   // ---- QA handoff -------------------------------------------------------
   job.state = "QA_RUNNING";
   audits.push(audit(job, "Orchestrator", "qa_handoff", "Draft handed off to QA Agent.", "DRAFTED", "QA_RUNNING"));
-  const handoff = job.lane === "production" ? job.production!.qaHandoffPackage : job.repurposing!.qaHandoffPackage;
+  const handoff =
+    job.lane === "production" ? job.production!.qaHandoffPackage :
+    job.lane === "video_intelligence" ? job.videoTranscript!.qaHandoffPackage :
+    job.repurposing!.qaHandoffPackage;
   const report = timed(job, "qa_agent", () => runQAAgent(draft, handoff, tier, ts, job.lane === "repurposing" ? "derivative" : "draft", job.lane === "repurposing" ? draft.id : undefined));
   job.qaReport = report;
   job.metrics.costUsd += 0.8;
@@ -227,7 +279,10 @@ export function submitToFinalQA(input: Job, revisedDraft: Draft, ts: string): Or
   job.state = "FINAL_QA_RUNNING";
   audits.push(audit(job, "Orchestrator", "final_qa_handoff", "Revised draft handed off to QA.", "CHANGES_APPLIED", "FINAL_QA_RUNNING"));
 
-  const handoff = job.lane === "production" ? job.production!.qaHandoffPackage : job.repurposing!.qaHandoffPackage;
+  const handoff =
+    job.lane === "production" ? job.production!.qaHandoffPackage :
+    job.lane === "video_intelligence" ? job.videoTranscript!.qaHandoffPackage :
+    job.repurposing!.qaHandoffPackage;
   const report = runQAAgent(revisedDraft, handoff, tier, ts, job.lane === "repurposing" ? "derivative" : "draft", job.lane === "repurposing" ? revisedDraft.id : undefined);
   job.finalQaReport = report;
   job.metrics.costUsd += 0.8;
@@ -251,6 +306,43 @@ export function submitToFinalQA(input: Job, revisedDraft: Draft, ts: string): Or
     job.state = "QA_REVISION";
     audits.push(audit(job, "QA Agent", "qa_revision", `Final QA returned ${report.overallScore}/5 — another revision required.`, "FINAL_QA_RUNNING", "QA_REVISION"));
   }
+
+  job.updatedAt = ts;
+  return { job, audits };
+}
+
+/* ------------------------------------------------------------------ */
+/* Editor Brief — final step of the video-intelligence path          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Runs EditorBriefAgent for a single approved clip and stores the resulting
+ * brief on the ClipApprovalEntry. Called by the store immediately after a
+ * reviewer approves a clip so approval + brief generation are one atomic
+ * operation from the store's perspective.
+ */
+export function runEditorBriefForClip(input: Job, entryId: string, ts: string): OrchestratorResult {
+  const job: Job = structuredClone(input);
+  const audits: AuditEntry[] = [];
+
+  const entry = job.clipApprovalQueue?.find((e) => e.id === entryId);
+  if (!entry || entry.status !== "approved") return { job, audits };
+
+  const videoSource = job.videoTranscript?.videoSource;
+  if (!videoSource) return { job, audits };
+
+  const editorBrief = timed(job, "editor_brief_agent", () =>
+    runEditorBriefAgent(entry, videoSource, job.brief, ts),
+  );
+  entry.editorBrief = editorBrief;
+  job.metrics.costUsd += 0.3;
+
+  audits.push(audit(
+    job,
+    "Editor Brief Agent",
+    "brief_generated",
+    `Editor brief generated for clip ${entry.clipId} (${entry.candidate.clipType} · ${entry.candidate.startTime}–${entry.candidate.endTime}). Markdown + PDF exports ready.`,
+  ));
 
   job.updatedAt = ts;
   return { job, audits };
@@ -293,11 +385,14 @@ export function writeDraftBack(job: Job, draft: Draft) {
   } else if (job.lane === "repurposing" && job.repurposing) {
     const idx = job.repurposing.derivatives.findIndex((d) => d.id === draft.id);
     if (idx >= 0) job.repurposing.derivatives[idx] = { ...job.repurposing.derivatives[idx], ...draft };
+  } else if (job.lane === "video_intelligence" && job.videoTranscript) {
+    job.videoTranscript.draft = draft;
   }
 }
 
 /** The primary draft/derivative the QA workspace operates on. */
 export function primaryDraft(job: Job): Draft | null {
   if (job.lane === "production") return job.production?.draft ?? null;
+  if (job.lane === "video_intelligence") return job.videoTranscript?.draft ?? null;
   return job.repurposing?.derivatives[0] ?? null;
 }

@@ -20,13 +20,14 @@ const REASON_TEXT: Record<HumanReviewKind, { reason: string; verify: string; act
   executive_thought_leadership: { reason: "High-visibility executive content.", verify: "Confirm tone and positioning match executive standards.", action: "Review for executive readiness." },
   blocked_output: { reason: "QA blocked this output.", verify: "Review the fundamental QA issues that triggered the block.", action: "Rework or kill." },
   failed_revisions: { reason: "Failed two QA revision attempts.", verify: "Decide whether to approve, edit directly, or kill.", action: "Make a final call." },
+  flagged_clip_content: { reason: "Clip candidates contain product claims or regulatory language.", verify: "Review each flagged clip in the Clip Approval Queue and confirm accuracy before publishing.", action: "Approve or reject flagged clips." },
 };
 
 function jobTypeLabel(j: Job) {
   return j.qaOnly ? "QA Check" : JOB_TYPES.find((t) => t.value === j.brief.jobType)?.label ?? j.brief.jobType;
 }
 function primaryReason(j: Job): HumanReviewKind | null {
-  const order: HumanReviewKind[] = ["blocked_output", "unresolved_product_claim", "legal_sensitive", "compliance_sensitive", "competitive_claim", "tier2", "executive_thought_leadership", "unresolved_factual_claim", "failed_revisions"];
+  const order: HumanReviewKind[] = ["blocked_output", "unresolved_product_claim", "legal_sensitive", "compliance_sensitive", "competitive_claim", "tier2", "executive_thought_leadership", "unresolved_factual_claim", "failed_revisions", "flagged_clip_content"];
   const reasons = j.humanReview?.reasons ?? [];
   return order.find((r) => reasons.includes(r)) ?? reasons[0] ?? null;
 }

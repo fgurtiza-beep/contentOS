@@ -53,7 +53,44 @@ function draftToHtml(d: Draft): string {
   return `<!doctype html>\n<html><head><meta charset="utf-8"><title>${esc(d.title)}</title></head>\n<body>\n${body}\n</body></html>`;
 }
 
+/** Render all approved editor briefs for a video-intelligence job. */
+export function renderEditorBriefExport(job: Job, format: "markdown" | "html"): string {
+  const briefs = (job.clipApprovalQueue ?? [])
+    .filter((e) => e.status === "approved" && e.editorBrief)
+    .map((e) => e.editorBrief!);
+
+  if (briefs.length === 0) return format === "markdown"
+    ? "<!-- No approved editor briefs on this job. -->"
+    : "<p>No approved editor briefs on this job.</p>";
+
+  if (format === "markdown") {
+    return briefs.map((b, i) =>
+      `<!-- Brief ${i + 1} of ${briefs.length} -->\n\n${b.markdownExport}`
+    ).join("\n\n---\n\n");
+  }
+
+  // HTML: concatenate each brief's pdfHtmlExport, wrapping all in a single document
+  const bodies = briefs.map((b, i) => {
+    // Extract just the <body> content from each brief's HTML
+    const bodyMatch = b.pdfHtmlExport.match(/<body>([\s\S]*?)<\/body>/);
+    const body = bodyMatch ? bodyMatch[1] : b.pdfHtmlExport;
+    return `<div class="brief-page" style="${i > 0 ? "page-break-before:always;padding-top:32px;" : ""}">${body}</div>`;
+  }).join("\n");
+
+  // Use the first brief's full HTML as the template (it has the <head>/styles)
+  return briefs[0].pdfHtmlExport.replace(
+    /<body>[\s\S]*?<\/body>/,
+    `<body>${bodies}</body>`,
+  );
+}
+
 export function renderExport(job: Job, format: ExportFormat): string {
+  // Video-intelligence jobs: primary export is the editor brief collection
+  if (job.lane === "video_intelligence") {
+    if (format === "markdown") return renderEditorBriefExport(job, "markdown");
+    if (format === "html")     return renderEditorBriefExport(job, "html");
+  }
+
   const draft = primaryDraft(job);
   if (!draft) return "// No content available to export.";
 
