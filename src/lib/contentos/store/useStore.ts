@@ -24,6 +24,10 @@ export function useAudits(): AuditEntry[] {
   return useStore().audits;
 }
 
+export function useCalendarSchedule(): Record<string, { date: string; time: string }> {
+  return useStore().calendarSchedule;
+}
+
 export function useTrendStore() {
   return useSyncExternalStore(trendStore.subscribe, trendStore.getSnapshot, trendStore.getSnapshot);
 }
