@@ -36,6 +36,7 @@ import {
 } from "../orchestrator/contentOrchestrator";
 import { assessRisk } from "../orchestrator/riskTiering";
 import { runQAAgent } from "../agents/qaAgent";
+import { runHookQACheck } from "../agents/hookScorer";
 import { gtmStudioProductService } from "../data/gtmStudioProductService";
 import { renderExport } from "../export/exporters";
 import { block, nextId, now } from "../util";
@@ -44,14 +45,31 @@ import { seedJobs } from "./seed";
 interface StoreState {
   jobs: Job[];
   audits: AuditEntry[];
+  calendarSchedule: Record<string, { date: string; time: string }>;
 }
 
-let state: StoreState = seedJobs();
+const SCHEDULE_STORAGE_KEY = "contentos_calendar_schedule";
+
+function loadSchedule(): Record<string, { date: string; time: string }> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(SCHEDULE_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, { date: string; time: string }>) : {};
+  } catch { return {}; }
+}
+
+function saveSchedule(s: Record<string, { date: string; time: string }>) {
+  if (typeof window === "undefined") return;
+  try { window.localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(s)); } catch {}
+}
+
+const { jobs: _seedJobs, audits: _seedAudits } = seedJobs() as { jobs: Job[]; audits: AuditEntry[] };
+let state: StoreState = { jobs: _seedJobs, audits: _seedAudits, calendarSchedule: loadSchedule() };
 const listeners = new Set<() => void>();
 
 function emit() {
   // Replace top-level refs so React sees a new snapshot.
-  state = { jobs: [...state.jobs], audits: [...state.audits] };
+  state = { ...state, jobs: [...state.jobs], audits: [...state.audits] };
   listeners.forEach((l) => l());
 }
 
@@ -247,6 +265,39 @@ export const jobStore = {
     replaceJob(job);
   },
 
+  /* ---------------- Hook alternative accept ------------------------ */
+
+  acceptHookAlternative(jobId: string, line: string, actor = "marketing@sprout.ph") {
+    const job = clone(this.getJob(jobId));
+    if (!job) return;
+    const draft = primaryDraft(job);
+    if (!draft) return;
+
+    // Swap the first non-empty line of the first paragraph block
+    const firstPara = draft.blocks.find(b => b.kind === "paragraph");
+    if (!firstPara) return;
+    const lines = firstPara.text.split("\n");
+    const idx = lines.findIndex(l => l.trim());
+    if (idx < 0) return;
+    lines[idx] = line;
+    firstPara.text = lines.join("\n");
+
+    pushVersion(draft, "user_approved", actor);
+    writeDraftBack(job, draft);
+
+    // Re-run the hook check only — not full QA
+    const handoff = job.production?.qaHandoffPackage;
+    const icp     = handoff?.socialContext?.icp ?? "";
+    const pain    = handoff?.socialContext?.primaryPain ?? "";
+    const newHookResult = runHookQACheck(draft.blocks, icp, pain);
+    if (job.qaReport)      job.qaReport      = { ...job.qaReport,      hookQA: newHookResult };
+    if (job.finalQaReport) job.finalQaReport = { ...job.finalQaReport, hookQA: newHookResult };
+
+    job.updatedAt = now();
+    record({ jobId, actor, action: "hook_alternative_accepted", detail: `Hook alternative accepted: "${line.slice(0, 80)}…"` });
+    replaceJob(job);
+  },
+
   /* ---------------- Live manual editing of content ----------------- */
 
   editBlockText(jobId: string, blockId: string, text: string, actor = "marketing@sprout.ph") {
@@ -425,6 +476,26 @@ export const jobStore = {
     job.updatedAt = now();
     record({ jobId, actor: by, action: "ship", detail: "Marked shipped.", fromState: from, toState: "SHIPPED" });
     replaceJob(job);
+  },
+
+  /* ---------------- Content Calendar scheduling -------------------- */
+
+  getCalendarSchedule(): Record<string, { date: string; time: string }> {
+    return state.calendarSchedule;
+  },
+
+  schedulePost(postId: string, date: string, time: string) {
+    state.calendarSchedule = { ...state.calendarSchedule, [postId]: { date, time } };
+    saveSchedule(state.calendarSchedule);
+    emit();
+  },
+
+  unschedulePost(postId: string) {
+    const next = { ...state.calendarSchedule };
+    delete next[postId];
+    state.calendarSchedule = next;
+    saveSchedule(state.calendarSchedule);
+    emit();
   },
 };
 

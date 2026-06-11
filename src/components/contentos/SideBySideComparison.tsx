@@ -52,20 +52,22 @@ export function SideBySideComparison({
         )}
 
         {view === "current" &&
-          draft.blocks.map((b) => {
+          draft.blocks.map((b, idx) => {
             const blockSugs = suggestions.filter((s) => s.blockId === b.id);
             const applied = blockSugs.find((s) => s.decision === "accepted" || s.decision === "edited");
             const hasCritical = blockSugs.some((s) => s.severity === "critical" && s.decision === "pending");
             const hasFlag = blockSugs.some((s) => s.decision === "pending");
             const active = activeBlockId === b.id;
             const cls = hasCritical ? "flagged-crit" : hasFlag ? "flagged" : "";
+            // Pass the preceding h3 header text so char-count limits can be platform-aware
+            const prevH3 = draft.blocks.slice(0, idx).reverse().find(pb => pb.kind === "h3")?.text;
             return (
               <div key={b.id} className={`qa-block ${cls}`} style={active ? { outline: "2px solid var(--ubas)" } : undefined} onClick={() => onSelectBlock(b.id)}>
                 <div className="kind" style={{ display: "flex", justifyContent: "space-between" }}>
                   <span>{b.kind} · block {b.order + 1}{blockSugs.length ? ` · ${blockSugs.length} issue(s)` : ""}{applied ? " · change applied" : ""}</span>
                   <span className="edit-hint">editable ✎</span>
                 </div>
-                {applied ? <TrackedChange b={b} s={applied} /> : <EditableBlock key={`${b.id}:${b.text}`} b={b} onCommit={(t) => onEditBlock(b.id, t)} />}
+                {applied ? <TrackedChange b={b} s={applied} /> : <EditableBlock key={`${b.id}:${b.text}`} b={b} headerText={prevH3} onCommit={(t) => onEditBlock(b.id, t)} />}
               </div>
             );
           })}
@@ -74,22 +76,59 @@ export function SideBySideComparison({
   );
 }
 
-function EditableBlock({ b, onCommit }: { b: ContentBlock; onCommit: (text: string) => void }) {
+// Character limits for known social platforms (matches SOCIAL_PLATFORMS in JobIntakeForm)
+const PLATFORM_CHAR_LIMITS: Record<string, { soft: number; hard: number }> = {
+  "linkedin caption":  { soft: 700,   hard: 3000 },
+  "facebook caption":  { soft: 400,   hard: 63206 },
+  "instagram caption": { soft: 150,   hard: 2200 },
+  "x caption":         { soft: 280,   hard: 280 },
+  "threads caption":   { soft: 500,   hard: 500 },
+};
+
+function EditableBlock({ b, headerText, onCommit }: { b: ContentBlock; headerText?: string; onCommit: (text: string) => void }) {
   // Mounted fresh whenever b.text changes externally (keyed by caller), so local
   // edit state never drifts from the committed block text.
   const [val, setVal] = useState(b.text);
   const big = b.kind === "h1";
   const med = b.kind === "h2" || b.kind === "h3";
+  const isPara = b.kind === "paragraph";
+
+  // Detect platform from the preceding h3 header text
+  const platformKey = headerText?.toLowerCase().trim();
+  const limits = platformKey ? PLATFORM_CHAR_LIMITS[platformKey] : undefined;
+  const charCount = val.replace(/\n/g, " ").length;
+  const overHard = limits && charCount > limits.hard;
+  const overSoft = limits && !overHard && charCount > limits.soft;
+
   return (
-    <textarea
-      className="editblock"
-      value={val}
-      onChange={(e) => setVal(e.target.value)}
-      onBlur={() => { if (val !== b.text) onCommit(val); }}
-      onClick={(e) => e.stopPropagation()}
-      rows={big || med ? 1 : Math.max(2, Math.ceil(val.length / 70))}
-      style={big ? { fontSize: 17, fontWeight: 700, color: "var(--green-deep)" } : med ? { fontSize: 14, fontWeight: 700, color: "var(--green-deep)" } : undefined}
-    />
+    <div>
+      <textarea
+        className="editblock"
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={() => { if (val !== b.text) onCommit(val); }}
+        onClick={(e) => e.stopPropagation()}
+        rows={big || med ? 1 : Math.max(2, Math.ceil(val.length / 70))}
+        style={big ? { fontSize: 17, fontWeight: 700, color: "var(--green-deep)" } : med ? { fontSize: 14, fontWeight: 700, color: "var(--green-deep)" } : undefined}
+      />
+      {isPara && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 2, gap: 8 }}>
+          <span
+            className="tiny mono"
+            style={{
+              color: overHard ? "var(--red)" : overSoft ? "#f6ad55" : "var(--text-faint)",
+              fontWeight: overHard || overSoft ? 700 : 400,
+            }}
+          >
+            {charCount.toLocaleString()} chars
+            {limits && ` · best practice ${limits.soft.toLocaleString()}`}
+            {limits && ` · max ${limits.hard.toLocaleString()}`}
+            {overHard && " ⚠ over limit"}
+            {overSoft && " · over best practice"}
+          </span>
+        </div>
+      )}
+    </div>
   );
 }
 

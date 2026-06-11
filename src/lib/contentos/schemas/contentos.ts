@@ -126,6 +126,12 @@ export interface StandardizedBrief {
   volumeTarget: string;
   riskSensitivity: RiskSensitivity;
 
+  // Social post platform targeting (social_post jobType only)
+  socialPlatforms?: string[];
+
+  // Content pillar tag (social_post jobType only, optional)
+  contentPillar?: string;
+
   // Addenda
   regulatory?: RegulatoryAddendum;
   competitorAddendum?: CompetitorAddendum;
@@ -384,6 +390,7 @@ export interface QAReport {
   criticalFixes: string[];
   confidence: number;
   recommendedNextSteps: string[];
+  hookQA?: HookQAResult;
 }
 
 /* ------------------------------------------------------------------ */
@@ -405,6 +412,8 @@ export interface Draft {
   format: string;
   blocks: ContentBlock[];
   versions: ContentVersion[];
+  hookScore?: number;
+  hookAlternatives?: HookAlternative[];
 }
 
 /** Repurposing derivative — one channel-native output from the canonical narrative. */
@@ -441,12 +450,30 @@ export interface RepurposingOutput {
   qaHandoffPackage: QAHandoffPackage;
 }
 
+export interface HookAlternative {
+  line: string;
+  score: number;
+  breakdown: { specificity: number; patternInterrupt: number; icpRelevance: number };
+}
+
+export interface HookQAResult {
+  firstLine: string;
+  totalScore: number;
+  breakdown: { specificity: number; patternInterrupt: number; icpRelevance: number };
+  bannedPatternHit: string | null;
+  pass: boolean;
+  alternatives: HookAlternative[];
+}
+
 export interface QAHandoffPackage {
   riskTier: RiskTier;
   productClaims: ProductClaim[];
   factualClaims: FactualClaim[];
   sourceMap: SourceMapEntry[];
   references: string[];
+  agentHookScore?: number;
+  agentHookAlternatives?: HookAlternative[];
+  socialContext?: { icp: string; primaryPain: string };
 }
 
 /* ------------------------------------------------------------------ */

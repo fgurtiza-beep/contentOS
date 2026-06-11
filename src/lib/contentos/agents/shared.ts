@@ -59,9 +59,14 @@ export function buildCanonicalNarrative(
 ): CanonicalNarrative {
   const product = brief.product ? gtmStudioProductService.getProduct(brief.product) : undefined;
 
+  const pain   = brief.painPoints?.[0]?.toLowerCase();
+  const market = `Philippine ${brief.industry || "market"}`;
+  const who    = icp?.label ?? brief.persona;
   const thesis =
     campaign?.positioning ??
-    `${brief.objective} For ${icp?.label ?? brief.persona} in the Philippine ${brief.industry || "market"}, the path forward is practical, compliant, and people-first.`;
+    (pain
+      ? `${who} teams in the ${market} are still dealing with ${pain} — a daily drag on productivity and compliance confidence. The path forward is practical, people-first, and built for how PH businesses actually operate.`
+      : `For ${who} in the ${market}, the path forward is practical, compliant, and people-first.`);
 
   const keyInsights = [
     ...(icp?.painPoints.slice(0, 2) ?? []),

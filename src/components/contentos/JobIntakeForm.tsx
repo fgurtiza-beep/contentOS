@@ -20,9 +20,18 @@ import { icpKnowledgeService } from "@/lib/contentos/data/icpKnowledgeService";
 import { campaignKnowledgeService } from "@/lib/contentos/data/campaignKnowledgeService";
 import { databricksApprovedViewsService } from "@/lib/contentos/data/databricksApprovedViewsService";
 import { Stepper, AccordionSection } from "./ui";
+import PILLARS from "@/lib/contentos/config/contentPillars";
 
 const READINESS: Readiness[] = ["unaware", "problem_aware", "solution_aware", "evaluating", "decision"];
 const INTENTS: ContentIntent[] = ["awareness", "consideration", "evaluation", "conversion", "retention", "advocacy"];
+
+export const SOCIAL_PLATFORMS = [
+  { id: "LinkedIn",  icon: "in", color: "#0077b5", bestPracticeChars: 700,  charLimit: 3000 },
+  { id: "Facebook",  icon: "f",  color: "#1877f2", bestPracticeChars: 400,  charLimit: 63206 },
+  { id: "Instagram", icon: "ig", color: "#e1306c", bestPracticeChars: 150,  charLimit: 2200 },
+  { id: "X",         icon: "𝕏",  color: "#000000", bestPracticeChars: 280,  charLimit: 280 },
+  { id: "Threads",   icon: "@",  color: "#000000", bestPracticeChars: 500,  charLimit: 500 },
+];
 const REPURPOSE_CHANNELS = ["LinkedIn", "X", "Instagram", "Email", "Blog"];
 
 
@@ -143,6 +152,8 @@ function BriefForm({ jobType, lane, onSubmit }: { jobType: JobType; lane: AgentL
     competitorName: "", allowedToName: false, comparisonsPermitted: false, differentiationPillars: "", prohibitedClaims: "pricing, security, uptime",
     mustCite: true, directQuotesAllowed: false, dataMisrepresentationRisks: "", requiredSources: "",
     channelQtys: { LinkedIn: 3, X: 0, Instagram: 0, Email: 1, Blog: 0 } as Record<string, number>,
+    socialPlatforms: ["LinkedIn"] as string[],
+    contentPillar: "",
   });
   const set = (k: keyof typeof f, v: unknown) => setF((p) => ({ ...p, [k]: v }));
   const toggleIntent = (i: ContentIntent) => set("contentIntent", f.contentIntent.includes(i) ? f.contentIntent.filter((x) => x !== i) : [...f.contentIntent, i]);
@@ -175,6 +186,8 @@ function BriefForm({ jobType, lane, onSubmit }: { jobType: JobType; lane: AgentL
       regulatory: isRegulatory ? { issuingBody: f.issuingBody, effectiveDate: f.effectiveDate, affectedAudience: f.affectedAudience, uncertaintyAreas: f.uncertaintyAreas, legalReviewNeeded: f.legalReviewNeeded, sproutCTAAllowed: f.sproutCTAAllowed } : undefined,
       competitorAddendum: isCompetitor || f.competitor ? { competitorName: f.competitorName || f.competitor, allowedToNameCompetitor: f.allowedToName, comparisonsPermitted: f.comparisonsPermitted, differentiationPillars: splitList(f.differentiationPillars), prohibitedClaims: splitList(f.prohibitedClaims) } : undefined,
       research: jobType === "convert_external_report" ? { mustCite: f.mustCite, directQuotesAllowed: f.directQuotesAllowed, dataMisrepresentationRisks: f.dataMisrepresentationRisks, requiredSources: splitList(f.requiredSources) } : undefined,
+      socialPlatforms: jobType === "social_post" && f.socialPlatforms.length > 0 ? f.socialPlatforms : undefined,
+      contentPillar: jobType === "social_post" && f.contentPillar ? f.contentPillar : undefined,
     };
     onSubmit(jobStore.submitBrief(brief, CURRENT_USER));
   }
@@ -271,6 +284,58 @@ function BriefForm({ jobType, lane, onSubmit }: { jobType: JobType; lane: AgentL
                 <Stepper value={f.amount} min={1} max={10} onChange={(n) => set("amount", n)} />
               )}
             </div>
+          </div>
+        )}
+
+        {jobType === "social_post" && (
+          <div className="field">
+            <label>Platforms <span className="faint tiny" style={{ fontWeight: 400 }}>— captions will be tailored per platform</span></label>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+              {SOCIAL_PLATFORMS.map((p) => {
+                const selected = f.socialPlatforms.includes(p.id);
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => set("socialPlatforms", selected
+                      ? f.socialPlatforms.filter(x => x !== p.id)
+                      : [...f.socialPlatforms, p.id]
+                    )}
+                    style={{
+                      padding: "5px 12px", borderRadius: 20, border: "1px solid",
+                      borderColor: selected ? p.color : "var(--border)",
+                      background: selected ? p.color + "18" : "transparent",
+                      color: selected ? p.color : "var(--text-faint)",
+                      fontSize: 12, fontWeight: selected ? 700 : 400, cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: 5,
+                    }}
+                  >
+                    <span>{p.icon}</span>
+                    <span>{p.id}</span>
+                    {selected && <span style={{ fontSize: 10 }}>✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+            {f.socialPlatforms.length > 0 && (
+              <div className="faint tiny" style={{ marginTop: 6 }}>
+                {f.socialPlatforms.map(p => {
+                  const spec = SOCIAL_PLATFORMS.find(s => s.id === p);
+                  return spec ? `${p}: ~${spec.bestPracticeChars} chars` : p;
+                }).join(" · ")}
+              </div>
+            )}
+          </div>
+        )}
+
+        {jobType === "social_post" && (
+          <div className="field">
+            <label>Content pillar <span className="faint tiny" style={{ fontWeight: 400 }}>— optional, recommended</span></label>
+            <select value={f.contentPillar} onChange={(e) => set("contentPillar", e.target.value)}>
+              <option value="">None (untagged)</option>
+              {PILLARS.map(p => <option key={p.slug} value={p.slug}>{p.icon} {p.name}</option>)}
+            </select>
+            <div className="faint tiny" style={{ marginTop: 4 }}>Tagging a pillar helps balance your content calendar.</div>
           </div>
         )}
       </AccordionSection>

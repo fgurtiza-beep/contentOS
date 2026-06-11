@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Job, QALayerKey } from "@/lib/contentos/schemas/contentos";
+import type { HookAlternative, HookQAResult, Job, QALayerKey, QAReport } from "@/lib/contentos/schemas/contentos";
 import { QA_LAYERS } from "@/lib/contentos/schemas/contentos";
 import { jobStore } from "@/lib/contentos/store/useStore";
 import { primaryDraft } from "@/lib/contentos/orchestrator/contentOrchestrator";
@@ -51,6 +51,7 @@ export function QAReviewWorkspace({ job, onGoExport }: { job: Job; onGoExport: (
 
         {/* RIGHT: QA feedback */}
         <div>
+          <HookAlternativesPanel job={job} report={report} />
           <QAScorecard report={report} />
           <ValidationPanels job={job} />
 
@@ -110,6 +111,67 @@ export function QAReviewWorkspace({ job, onGoExport }: { job: Job; onGoExport: (
           <button className="btn green accept-all" onClick={() => jobStore.acceptAll(job.id)}>✓ Accept All Changes</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ---- Hook Alternatives Panel ---- */
+
+function HookAlternativesPanel({ job, report }: { job: Job; report: QAReport }) {
+  const hookQA = report.hookQA;
+  if (!hookQA || hookQA.alternatives.length === 0) return null;
+
+  const banned  = hookQA.bannedPatternHit;
+  const subtext = banned
+    ? `banned pattern detected: "${banned}"`
+    : `score ${hookQA.totalScore}/9 — below the 7-point threshold`;
+
+  return (
+    <div className="panel" style={{ marginBottom: 16, borderColor: "#8139ee55", borderWidth: 2 }}>
+      <div className="panel-head" style={{ background: "#8139ee0e" }}>
+        <h3 style={{ color: "#8139ee" }}>Hook Alternatives</h3>
+        <span className="sub">{subtext}</span>
+      </div>
+      <div className="panel-pad">
+        <div style={{ marginBottom: 12 }}>
+          <div className="tiny" style={{ color: "var(--red)", marginBottom: 4, fontWeight: 700 }}>Current opening line</div>
+          <div className="muted" style={{ fontStyle: "italic", marginBottom: 8 }}>"{hookQA.firstLine}"</div>
+          <HookScoreRow breakdown={hookQA.breakdown} total={hookQA.totalScore} banned={!!banned} />
+        </div>
+        <div className="divider" />
+        <div style={{ marginTop: 12 }}>
+          {hookQA.alternatives.map((alt, i) => (
+            <div key={i} style={{ marginBottom: 10, padding: "10px 12px", background: "var(--surface-2)", borderRadius: 6, display: "flex", gap: 12, alignItems: "flex-start" }}>
+              <div style={{ flex: 1 }}>
+                <div className="tiny faint" style={{ marginBottom: 4 }}>Alt {i + 1}</div>
+                <div className="muted" style={{ marginBottom: 6 }}>"{alt.line}"</div>
+                <HookScoreRow breakdown={alt.breakdown} total={alt.score} banned={false} />
+              </div>
+              <button
+                className="btn sm"
+                style={{ flexShrink: 0, marginTop: 2 }}
+                onClick={() => jobStore.acceptHookAlternative(job.id, alt.line)}
+              >
+                Accept
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HookScoreRow({ breakdown, total, banned }: { breakdown: HookAlternative["breakdown"]; total: number; banned: boolean }) {
+  const color = (banned || total < 7) ? "#e53e3e" : total >= 8 ? "#31ce13" : "#f6ad55";
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      <span className="chip tiny">Specificity {breakdown.specificity}/3</span>
+      <span className="chip tiny">Pattern {breakdown.patternInterrupt}/3</span>
+      <span className="chip tiny">ICP fit {breakdown.icpRelevance}/3</span>
+      <span className="chip tiny" style={{ background: color + "22", color, fontWeight: 700 }}>
+        {banned ? "0 (banned)" : `${total}/9`}
+      </span>
     </div>
   );
 }
