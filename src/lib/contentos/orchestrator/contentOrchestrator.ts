@@ -97,8 +97,10 @@ export function runCreatorAndQA(input: Job, ts: string): OrchestratorResult {
     if (job.lane === "production") {
       const out = timed(job, "production_agent", () => runProductionAgent(job.brief, tier, ts));
       job.production = out;
+      job.generationReport = out.generationReport;
       job.metrics.productClaimFailures += out.productClaims.filter((c) => c.status !== "verified").length;
       draft = out.draft;
+      audits.push(audit(job, "Production Agent", "validation", out.generationReport.passed ? `Validation gate passed (${out.generationReport.internalLinks} links, ${out.generationReport.externalSources} sources).` : `Validation gate FAILED: ${out.generationReport.missing.join(", ")}.`, "BRIEFED", "BRIEFED"));
       audits.push(audit(job, "Production Agent", "pim", `Problem-Intent Map ready (${out.problemIntentMap.problems.length} problems).`, "BRIEFED", "PIM_READY"));
       audits.push(audit(job, "Production Agent", "narrative", "Canonical Narrative ready.", "PIM_READY", "NARRATIVE_READY"));
       audits.push(audit(job, "Production Agent", "blueprint", "Content Blueprint ready.", "NARRATIVE_READY", "BLUEPRINT_READY"));
@@ -178,7 +180,16 @@ export function runCreatorAndQA(input: Job, ts: string): OrchestratorResult {
     job.lane === "production" ? job.production!.qaHandoffPackage :
     job.lane === "video_intelligence" ? job.videoTranscript!.qaHandoffPackage :
     job.repurposing!.qaHandoffPackage;
-  const report = timed(job, "qa_agent", () => runQAAgent(draft, handoff, tier, ts, job.lane === "repurposing" ? "derivative" : "draft", job.lane === "repurposing" ? draft.id : undefined));
+  let report: QAReport;
+  if (job.lane === "repurposing" && job.repurposing) {
+    // QA EACH derivative individually — they're distinct channel-native assets, so
+    // each gets its own scores (per the IMD 2.0 / blueprint "per derivative" rule).
+    job.repurposing.derivatives = job.repurposing.derivatives.map((d) =>
+      ({ ...d, qaReport: runQAAgent(d, handoff, tier, ts, "derivative", d.id, job.brief) }));
+    report = job.repurposing.derivatives[0]?.qaReport ?? runQAAgent(draft, handoff, tier, ts, "derivative", draft.id, job.brief);
+  } else {
+    report = timed(job, "qa_agent", () => runQAAgent(draft, handoff, tier, ts, "draft", undefined, job.brief));
+  }
   job.qaReport = report;
   job.metrics.costUsd += 0.8;
   job.state = "QA_REVIEW_READY";
@@ -283,7 +294,7 @@ export function submitToFinalQA(input: Job, revisedDraft: Draft, ts: string): Or
     job.lane === "production" ? job.production!.qaHandoffPackage :
     job.lane === "video_intelligence" ? job.videoTranscript!.qaHandoffPackage :
     job.repurposing!.qaHandoffPackage;
-  const report = runQAAgent(revisedDraft, handoff, tier, ts, job.lane === "repurposing" ? "derivative" : "draft", job.lane === "repurposing" ? revisedDraft.id : undefined);
+  const report = runQAAgent(revisedDraft, handoff, tier, ts, job.lane === "repurposing" ? "derivative" : "draft", job.lane === "repurposing" ? revisedDraft.id : undefined, job.brief);
   job.finalQaReport = report;
   job.metrics.costUsd += 0.8;
 

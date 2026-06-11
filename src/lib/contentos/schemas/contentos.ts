@@ -527,7 +527,7 @@ export const QA_LAYERS: { key: QALayerKey; index: number; name: string; short: s
   { key: "channel_optimization", index: 5, name: "Channel-Specific Optimization", short: "Channel" },
   { key: "tone_authenticity", index: 6, name: "Tone Authenticity & AI Detection", short: "Authenticity" },
   { key: "visual_structural", index: 7, name: "Visual & Structural Integrity", short: "Visual" },
-  { key: "product_gtm_accuracy", index: 8, name: "Product & GTM Accuracy", short: "Product/GTM" },
+  { key: "product_gtm_accuracy", index: 8, name: "Product & GTM Verification", short: "Product/GTM" },
 ];
 
 export type QAStatus = "pass" | "revision" | "fail";
@@ -552,6 +552,8 @@ export interface QASuggestion {
   severity: Severity;
   currentText: string;
   suggestedReplacement: string;
+  /** advisory = guidance only (no exact text swap); rewrite = applies an inline before→after edit. */
+  advisory?: boolean;
   explanation: string;
   confidence: number; // 0..1
   sourceValidationStatus: ClaimStatus | "n/a";
@@ -607,11 +609,33 @@ export interface Draft {
 export interface Derivative extends Draft {
   intent: ContentIntent;
   derivedFromSourceAssetId: string;
+  /** Each derivative is QA'd individually (IMD 2.0: "QA Agent, per derivative"). */
+  qaReport?: QAReport;
 }
 
 /* ------------------------------------------------------------------ */
 /* Agent output packages                                              */
 /* ------------------------------------------------------------------ */
+
+/** One pre-publish validation check against the brief. */
+export interface GenerationCheck {
+  label: string;
+  ok: boolean;
+  detail?: string;
+}
+
+/**
+ * The validation gate result. If `passed` is false the orchestrator must NOT
+ * surface the draft as ready — the review screen shows the failure message and
+ * this checklist instead.
+ */
+export interface GenerationReport {
+  passed: boolean;
+  checks: GenerationCheck[];
+  missing: string[];
+  internalLinks: number;
+  externalSources: number;
+}
 
 export interface ProductionOutput {
   brief: StandardizedBrief;
@@ -623,6 +647,7 @@ export interface ProductionOutput {
   productClaims: ProductClaim[];
   factualClaims: FactualClaim[];
   sourceMap: SourceMapEntry[];
+  generationReport: GenerationReport;
   qaHandoffPackage: QAHandoffPackage;
 }
 
@@ -845,6 +870,17 @@ export interface Job {
   reviewRecommendation?: { needed: boolean; reasons: HumanReviewKind[]; note: string };
   /** Detected mismatches between the uploaded brief and the submitted intake. */
   briefConflicts?: string[];
+  /** Pre-publish validation gate result. If not passed, the draft is withheld. */
+  generationReport?: GenerationReport;
+  /** Real (LLM) article generation status. Absent = not attempted. */
+  llmStatus?: "writing" | "done" | "fallback" | "error";
+  /** Why real generation didn't produce a displayable draft (no_key, quality, error…). */
+  llmReason?: string;
+  llmMessage?: string;
+  llmIssues?: string[];
+  /** Bumped when the draft body is replaced EXTERNALLY (generation, regenerate),
+   * so the WYSIWYG editor remounts; autosaves from the editor do NOT bump it. */
+  draftRevision?: number;
   /** Stakeholder comments left on the draft during preview/editing. */
   draftComments?: { at: string; author: string; text: string }[];
 

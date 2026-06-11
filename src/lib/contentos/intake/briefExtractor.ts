@@ -129,6 +129,20 @@ function inferGoals(text: string): string[] {
   return out.slice(0, 4);
 }
 
+/** Raw text + a clean title from an uploaded file — used for the repurposing
+ * SOURCE ASSET (we keep the full content, not a parsed brief). */
+export async function extractTextFromFile(file: File): Promise<{ text: string; title: string; words: number }> {
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  let text = "";
+  try {
+    if (ext === "docx") text = await docxToText(file);
+    else if (ext === "pdf") text = await pdfToText(file);
+    else if (TEXT_EXT.includes(ext) || file.type.startsWith("text/")) text = await file.text();
+  } catch { text = ""; }
+  text = text.trim();
+  return { text, title: cleanName(file.name), words: text ? text.split(/\s+/).length : 0 };
+}
+
 export async function extractBriefFromFile(file: File): Promise<ExtractedBrief> {
   const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
   try {
@@ -327,9 +341,12 @@ function firstHeading(text: string): string | undefined {
   return m ? m[1].trim() : undefined;
 }
 
+// Site chrome to skip when guessing a title from pasted webpage text.
+const CHROME_TITLE = /^(skip to (content|main)|menu|search|subscribe|sign ?in|log ?in|home|about|contact|share|cookie|we use cookies|privacy|terms|follow us|read more|back to top|newsletter|get started|book a (demo|meeting)|toggle|navigation|©)\b/i;
 function firstLine(text: string): string | undefined {
-  const line = text.split("\n").map((l) => l.trim()).find(Boolean);
-  return line && line.length <= 120 ? line.replace(/^#+\s*/, "") : undefined;
+  const line = text.split("\n").map((l) => l.trim()).filter(Boolean)
+    .find((l) => l.length >= 6 && l.length <= 120 && !CHROME_TITLE.test(l) && /[a-z]/.test(l) && /\s/.test(l));
+  return line ? line.replace(/^#+\s*/, "") : undefined;
 }
 
 function cleanName(name: string): string {

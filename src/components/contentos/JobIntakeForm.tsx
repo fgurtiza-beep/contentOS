@@ -21,7 +21,8 @@ import { TYPE_META } from "@/lib/contentos/uiMeta";
 import { gtmStudioProductService } from "@/lib/contentos/data/gtmStudioProductService";
 import { icpKnowledgeService } from "@/lib/contentos/data/icpKnowledgeService";
 import { Stepper, AccordionSection, MultiSelect } from "./ui";
-import { extractBriefFromFile, extractBriefFromText, type ExtractedBrief } from "@/lib/contentos/intake/briefExtractor";
+import { extractBriefFromFile, extractBriefFromText, extractTextFromFile, type ExtractedBrief } from "@/lib/contentos/intake/briefExtractor";
+import { suggestDerivatives, planToDesiredOutputs, FORMAT_CATALOG, makeDerivFromCatalog, type DerivItem } from "@/lib/contentos/intake/repurposePlan";
 
 const REPURPOSE_CHANNELS = ["LinkedIn", "X", "Instagram", "Email", "Blog"];
 const NONE_PRODUCT = "__none__";
@@ -179,7 +180,7 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
 
   // ---- Repurpose / addenda ----
   const [a, setA] = useState({
-    srcTitle: "", srcType: "report", srcUrl: "", srcContent: "", srcApproved: true,
+    srcTitle: "", srcType: "report", srcUrl: "", srcContent: "", srcApproved: true, srcWords: 0,
     vidTitle: "", vidUrl: "", vidUrlType: "youtube" as VideoSourceType, vidTranscript: "",
     issuingBody: "DOLE", effectiveDate: "", legalReviewNeeded: true,
     competitorName: "", allowedToName: false, differentiationPillars: "",
@@ -198,6 +199,38 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
   const [showPaste, setShowPaste] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [showErrors, setShowErrors] = useState(false);
+
+  // ---- Repurposing: source-asset upload + suggested derivative plan ----
+  const [plan, setPlan] = useState<DerivItem[]>(() => suggestDerivatives("report", 0));
+  const [srcUploading, setSrcUploading] = useState(false);
+  const [srcDrag, setSrcDrag] = useState(false);
+  const srcFileInput = useRef<HTMLInputElement>(null);
+  async function handleSourceFile(file: File) {
+    setSrcUploading(true);
+    try {
+      const { text, title, words } = await extractTextFromFile(file);
+      if (text) {
+        setA((p) => ({ ...p, srcTitle: p.srcTitle || title, srcContent: text, srcWords: words }));
+        setPlan(suggestDerivatives(a.srcType, words)); // re-suggest based on the uploaded asset
+        applyExtraction(extractBriefFromText(text, title)); // autofill audience/pains/goals/products
+      } else {
+        setExtractMsg({ text: `We couldn't read text from “${title}”. Paste the content instead.`, filled: [], tone: "warn" });
+      }
+    } finally { setSrcUploading(false); if (srcFileInput.current) srcFileInput.current.value = ""; }
+  }
+  // Paste path: autofill the brief from the pasted source text.
+  function extractFromSourceText() {
+    const text = a.srcContent.trim();
+    if (text.length < 40) return;
+    setPlan(suggestDerivatives(a.srcType, a.srcWords));
+    applyExtraction(extractBriefFromText(text, a.srcTitle || "Source asset"));
+  }
+  const resuggestPlan = () => setPlan(suggestDerivatives(a.srcType, a.srcWords));
+  const togglePlan = (id: string) => setPlan((p) => p.map((d) => (d.id === id ? { ...d, on: !d.on } : d)));
+  const setPlanQty = (id: string, q: number) => setPlan((p) => p.map((d) => (d.id === id ? { ...d, quantity: q } : d)));
+  const addFormat = (catalogId: string) => { const item = makeDerivFromCatalog(catalogId, plan.length + 1); if (item) setPlan((p) => [...p, item]); };
+  const removePlan = (id: string) => setPlan((p) => p.filter((d) => d.id !== id));
+  const planTotal = plan.filter((d) => d.on).reduce((n, d) => n + d.quantity, 0);
 
   const isMulti = !isRepurpose && amount > 1;
   const isListicle = isBlog && contentFormat === "listicle";
@@ -277,21 +310,26 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
       if (!a.vidTranscript.trim() && !a.vidUrl.trim()) e.video = "Add a video URL or paste a transcript.";
       return e;
     }
-    if (!title.trim() && !isMulti) e.title = "Add a title or main topic.";
+    if (isRepurpose) {
+      if (!a.srcContent.trim()) e.source = "Upload or paste the source asset to repurpose.";
+      else if (!a.srcApproved) e.source = "Confirm the source asset is approved (IMD 2.0).";
+      if (planTotal === 0) e.plan = "Select at least one derivative format to create.";
+    }
+    if (!title.trim() && !isMulti && !isRepurpose) e.title = "Add a title or main topic.";
     if (painList.length === 0) e.pains = "Add at least one pain point.";
     if (goalSel.length === 0) e.goals = "Choose at least one goal.";
     if (isMulti && items.some((it) => !it.title.trim())) e.items = `Give each ${unitLabel} a topic.`;
     return e;
-  }, [isVideoIntel, a.vidTranscript, a.vidUrl, title, isMulti, painList.length, goalSel.length, items, unitLabel]);
+  }, [isVideoIntel, isRepurpose, a.vidTranscript, a.vidUrl, a.srcContent, a.srcApproved, planTotal, title, isMulti, painList.length, goalSel.length, items, unitLabel]);
   const valid = Object.keys(errors).length === 0;
 
   /* ------------------------------ Submit --------------------------------- */
 
   const desiredOutputs = useMemo(() => {
-    if (isRepurpose) return REPURPOSE_CHANNELS.filter((c) => a.channelQtys[c] > 0).map((c) => ({ channel: c, format: c === "Email" ? "newsletter" : c === "Blog" ? "blog" : "post", quantity: a.channelQtys[c] }));
+    if (isRepurpose) return planToDesiredOutputs(plan);
     if (isVideoIntel) return [{ channel: "video_intelligence", format: "transcript_analysis", quantity: 1 }];
     return [{ channel: jobType, format: jobType, quantity: amount }];
-  }, [isRepurpose, isVideoIntel, a.channelQtys, amount, jobType]);
+  }, [isRepurpose, isVideoIntel, plan, amount, jobType]);
 
   function buildAgencyExtract(): AgencyBriefExtract | undefined {
     const e = extracted?.agency;
@@ -339,7 +377,7 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
     const guidance = [otherNotes, extracted?.agency?.productMentionRules && `Product mention rules: ${extracted.agency.productMentionRules}`].filter(Boolean).join(" — ");
 
     return {
-      title: title || "Untitled job",
+      title: title || (isRepurpose ? a.srcTitle || "Repurposed asset" : "Untitled job"),
       objective: objective || goalSel.join("; ") || title,
       jobType,
       primaryICP, secondaryICPs: [], industry, segment: companySize,
@@ -440,6 +478,8 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
         <div className="block-title">1 · Essentials</div>
         {isMulti ? (
           <div className="field"><label>Batch theme <span className="hint">· optional</span></label><input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="The thread tying these blogs together" /></div>
+        ) : isRepurpose ? (
+          <div className="field"><label>Campaign / objective <span className="hint">· optional · the title comes from the source asset above</span></label><input type="text" value={objective} onChange={(e) => setObjective(e.target.value)} placeholder="What should this repurposing campaign achieve?" /></div>
         ) : (
           <>
             <div className="field"><label>Title / Main Topic {tag("title")}</label><input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="A working title, topic, or theme" /><span className="hint">A working title, topic, or theme all work.</span>{err("title")}</div>
@@ -486,9 +526,82 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
           <div className="field"><label>How many {unitLabel}s?</label><Stepper value={amount} min={1} max={maxQty} onChange={changeAmount} /></div>
         )}
         {isRepurpose && (
-          <div className="field"><label>Outputs per channel</label>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{REPURPOSE_CHANNELS.map((c) => <div key={c} style={{ display: "flex", alignItems: "center", gap: 8 }}><span className="tiny" style={{ width: 72 }}>{c}</span><Stepper value={a.channelQtys[c]} min={0} max={10} onChange={(n) => setAk("channelQtys", { ...a.channelQtys, [c]: n })} /></div>)}</div>
-          </div>
+          <>
+            {/* Source asset — upload the actual file (IMD 2.0: one approved source) */}
+            <div className="field">
+              <label>Source asset <span className="hint">· upload the file to repurpose</span></label>
+              <div
+                className={`upload-zone src-zone ${srcDrag ? "drag" : ""} ${srcUploading ? "busy" : ""}`}
+                onClick={() => srcFileInput.current?.click()}
+                onDragOver={(e) => { e.preventDefault(); setSrcDrag(true); }}
+                onDragLeave={() => setSrcDrag(false)}
+                onDrop={(e) => { e.preventDefault(); setSrcDrag(false); const f = e.dataTransfer.files?.[0]; if (f) handleSourceFile(f); }}
+              >
+                {a.srcContent ? (
+                  <div className="src-loaded">
+                    <span className="src-file">📄 {a.srcTitle || "Source asset"}</span>
+                    <span className="tiny faint">{a.srcWords.toLocaleString()} words loaded</span>
+                    <button type="button" className="btn sm" onClick={(e) => { e.stopPropagation(); setA((p) => ({ ...p, srcContent: "", srcWords: 0 })); }}>Replace</button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="uz-title">{srcUploading ? "Reading your asset…" : "Upload source asset"}</div>
+                    <div className="uz-sub tiny faint">PDF, DOCX, TXT, MD · or drag &amp; drop · the platform reads it to plan derivatives</div>
+                  </>
+                )}
+                <input ref={srcFileInput} type="file" accept=".pdf,.docx,.doc,.txt,.md,.markdown,.html,.rtf" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) handleSourceFile(f); }} />
+              </div>
+              <details className="src-paste" open={!!a.srcContent && !srcUploading}><summary className="tiny faint">or paste the source text</summary>
+                <textarea value={a.srcContent} onChange={(e) => { const v = e.target.value; setA((p) => ({ ...p, srcContent: v, srcWords: v.trim() ? v.trim().split(/\s+/).length : 0 })); }} onBlur={extractFromSourceText} placeholder="Paste the source asset content here — we'll auto-fill the brief below…" />
+                <button type="button" className="btn sm" onClick={extractFromSourceText} style={{ marginTop: 6 }}>Auto-fill brief from this text</button>
+              </details>
+              <div className="row" style={{ marginTop: 8 }}>
+                <div className="field"><label className="tiny">Asset type</label>
+                  <select value={a.srcType} onChange={(e) => { setAk("srcType", e.target.value); setPlan(suggestDerivatives(e.target.value, a.srcWords)); }}>
+                    {["report", "whitepaper", "ebook", "guide", "webinar", "video", "blog", "case study", "PR / announcement", "regulatory update"].map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div className="field"><label className="tiny">Title</label><input type="text" value={a.srcTitle} onChange={(e) => setAk("srcTitle", e.target.value)} placeholder="Source asset title" /></div>
+              </div>
+              <label className="tiny" style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 400, marginTop: 4 }}><input type="checkbox" checked={a.srcApproved} onChange={(e) => setAk("srcApproved", e.target.checked)} /> This source asset is approved (IMD 2.0 — required to proceed)</label>
+              {err("source")}
+            </div>
+
+            {/* Suggested derivative plan — platform recommends, user approves */}
+            <div className="field">
+              <label>Recommended derivative plan <span className="hint">· ContentOS suggests; you approve</span></label>
+              <div className="callout deriv-plan">
+                <div className="deriv-head">
+                  <span className="tiny">Best-fit formats for a <b>{a.srcType}</b>{a.srcWords ? ` (${a.srcWords.toLocaleString()} words)` : ""}. Toggle and adjust quantities.</span>
+                  <button type="button" className="btn sm" onClick={resuggestPlan}>↻ Re-suggest</button>
+                </div>
+                {plan.map((d) => (
+                  <div key={d.id} className={`deriv-row ${d.on ? "on" : "off"}`}>
+                    <label className="deriv-check"><input type="checkbox" checked={d.on} onChange={() => togglePlan(d.id)} /></label>
+                    <div className="deriv-info">
+                      <div className="deriv-name">{d.channel} · {d.format}{d.rationale !== "Added by you." ? (d.on && <span className="deriv-rec">recommended</span>) : <span className="deriv-rec you">your pick</span>}</div>
+                      <div className="deriv-why tiny faint">{d.rationale}</div>
+                    </div>
+                    <div className="deriv-qty"><Stepper value={d.quantity} min={1} max={10} onChange={(n) => setPlanQty(d.id, n)} /></div>
+                    <button type="button" className="deriv-x" title="Remove" onClick={() => removePlan(d.id)}>×</button>
+                  </div>
+                ))}
+                <div className="deriv-add">
+                  <select value="" onChange={(e) => { if (e.target.value) { addFormat(e.target.value); e.target.value = ""; } }}>
+                    <option value="">+ Add a format…</option>
+                    {["Content", "Email", "Social"].map((g) => (
+                      <optgroup key={g} label={g}>
+                        {FORMAT_CATALOG.filter((c) => c.group === g).map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                      </optgroup>
+                    ))}
+                  </select>
+                  <span className="tiny faint">Repurpose into any format — blog, ebook, press release, carousel, and more.</span>
+                </div>
+                <div className="deriv-total tiny">Plan total: <b>{planTotal}</b> derivative{planTotal === 1 ? "" : "s"} across {plan.filter((d) => d.on).length} format{plan.filter((d) => d.on).length === 1 ? "" : "s"}.</div>
+              </div>
+              {err("plan")}
+            </div>
+          </>
         )}
 
         {isBlog && !isMulti && (
@@ -573,14 +686,6 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
         <div className="field"><label>Must avoid</label><textarea value={mustAvoid} onChange={(e) => setMustAvoid(e.target.value)} placeholder={"e.g. Avoid competitor comparisons\nDo not mention pricing"} /></div>
         <div className="field"><label>Other notes</label><textarea value={otherNotes} onChange={(e) => setOtherNotes(e.target.value)} placeholder={"e.g. CEO requested this angle\nShould support the webinar launch"} /></div>
 
-        {isRepurpose && (
-          <div className="callout">
-            <b>Source Asset (IMD 2.0)</b> — exactly one approved source asset. No cross-asset blending.
-            <div className="field" style={{ marginTop: 8 }}><label>Source title</label><input type="text" value={a.srcTitle} onChange={(e) => setAk("srcTitle", e.target.value)} /></div>
-            <div className="field"><label>Source content / excerpt</label><textarea value={a.srcContent} onChange={(e) => setAk("srcContent", e.target.value)} /></div>
-            <label className="tiny" style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 400 }}><input type="checkbox" checked={a.srcApproved} onChange={(e) => setAk("srcApproved", e.target.checked)} /> Source asset is approved (required to proceed)</label>
-          </div>
-        )}
         {isCompetitorType && (
           <div className="callout warn" style={{ marginTop: 10 }}>
             <b>Competitor addendum (Tier 2)</b>

@@ -66,7 +66,7 @@ export function parseAgencyBrief(raw: string): AgencyBriefExtract {
     competitorGaps: parseCompetitors(s.competitor ?? ""),
     triggerEvents: triggerEvents(s.audience ?? ""),
     keyMessaging: bulletLeads(s.messaging ?? ""),
-    painPoints: bulletLeads(s.painPoints ?? ""),
+    painPoints: cleanPains(bulletLeads(s.painPoints ?? "")),
     titleOptions: parseTitleOptions(s.titleOptions ?? ""),
     outline: parseOutline(s.outline ?? ""),
     keywords: parseKeywords(s.keywords ?? ""),
@@ -339,6 +339,19 @@ function upsert(map: Map<string, DetectedProduct>, name: string, slug: string | 
 /* ------------------------------------------------------------------ */
 /* Small helpers                                                      */
 /* ------------------------------------------------------------------ */
+
+// A pain point must read like an actual problem — drop jargon-y bullet leads
+// ("Stuck between two slogans", "No threshold to anchor to") that carry no pain signal.
+const PAIN_HINT = /cost|budget|price|expensive|spend|error|mistake|inaccur|manual|spreadsheet|rekey|\btime\b|slow|delay|late|complian|penalt|audit|statutor|risk|exposure|liabilit|scal|grow|expand|turnover|attrition|retention|churn|visib|fragment|silo|report|analytic|disput|pressure|confus|complex|burden|overwhelm|struggl|friction|gap|wrong|miss|lack|hard|difficult|challeng|anxiet|uncertain|overhead|bottleneck/i;
+function cleanPains(leads: string[]): string[] {
+  const kept = leads.filter((p) => {
+    const words = p.split(/\s+/).length;
+    if (words > 9) return false;            // explanations, not a pain label
+    if (PAIN_HINT.test(p)) return true;     // clearly a pain
+    return words <= 3 && /^[A-Z][a-z]+(\s+[a-z]+)?$/.test(p); // short clean noun phrase ("Budget pressure")
+  });
+  return Array.from(new Set(kept)).slice(0, 6);
+}
 
 function bulletLeads(section: string): string[] {
   if (!section) return [];
