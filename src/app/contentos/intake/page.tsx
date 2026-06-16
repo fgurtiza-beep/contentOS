@@ -1,5 +1,10 @@
+import { Suspense } from "react";
 import { JobIntakeForm } from "@/components/contentos/JobIntakeForm";
 
 export default function Page() {
-  return <JobIntakeForm />;
+  return (
+    <Suspense>
+      <JobIntakeForm />
+    </Suspense>
+  );
 }

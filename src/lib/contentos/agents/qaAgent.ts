@@ -26,6 +26,7 @@
 import type {
   ContentBlock,
   Draft,
+  HookQAResult,
   QAHandoffPackage,
   QALayerKey,
   QALayerResult,
@@ -37,6 +38,7 @@ import type {
   Severity,
   StandardizedBrief,
 } from "../schemas/contentos";
+import { runHookQACheck } from "./hookScorer";
 import {
   PRODUCT_GTM_REVIEW_FLOOR,
   QA_LAYERS,
@@ -66,6 +68,20 @@ export function runQAAgent(
   const wordTotal = blocks.filter((b) => b.kind !== "meta").reduce((n, b) => n + b.text.split(/\s+/).filter(Boolean).length, 0);
   const paras = blocks.filter((b) => b.kind === "paragraph");
   const suggestions: QASuggestion[] = [];
+
+  // ---- Hook Quality check (social posts only) — runs before all QA layers --
+  // Independent from the production agent's self-check. Never affects routing
+  // or the existing QA score. Surfaces alternatives when score ≤ 6 or a banned
+  // pattern is detected; passes silently when score is 7–9 with no banned match.
+  let hookQAResult: HookQAResult | undefined;
+  const isSocialPost = content.format === "social_post" || !!handoff.socialContext;
+  if (isSocialPost) {
+    hookQAResult = runHookQACheck(
+      blocks,
+      handoff.socialContext?.icp ?? "",
+      handoff.socialContext?.primaryPain ?? "",
+    );
+  }
 
   const layerAccumulator: Record<QALayerKey, { issues: string[]; fixes: string[]; strengths: string[]; penalty: number }> =
     Object.fromEntries(QA_LAYERS.map((l) => [l.key, { issues: [], fixes: [], strengths: [], penalty: 0 }])) as never;
@@ -413,6 +429,7 @@ export function runQAAgent(
     criticalFixes: suggestions.filter((s) => s.severity === "critical" || s.severity === "high").map((s) => s.explanation).slice(0, 5),
     confidence: round1(avg(layers.map((l) => l.confidence))),
     recommendedNextSteps: nextSteps(routing, productFailures),
+    hookQA: hookQAResult,
   };
 }
 

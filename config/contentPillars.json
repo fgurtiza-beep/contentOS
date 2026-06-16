@@ -1,0 +1,10 @@
+[
+  { "slug": "onsite-events",     "name": "Onsite events",             "color": "#7c3aed", "icon": "📍" },
+  { "slug": "online-events",     "name": "Online events",             "color": "#2563eb", "icon": "💻" },
+  { "slug": "product-spotlight", "name": "Product spotlight",         "color": "#059669", "icon": "✨" },
+  { "slug": "employer-branding", "name": "Employer branding",         "color": "#d97706", "icon": "🏢" },
+  { "slug": "customer-success",  "name": "Customer success stories",  "color": "#dc2626", "icon": "⭐" },
+  { "slug": "demand",            "name": "Demand",                    "color": "#db2777", "icon": "📈" },
+  { "slug": "evergreen",         "name": "Evergreen",                 "color": "#16a34a", "icon": "🌿" },
+  { "slug": "legal-alerts",      "name": "Legal alerts",              "color": "#b45309", "icon": "⚖️" }
+]

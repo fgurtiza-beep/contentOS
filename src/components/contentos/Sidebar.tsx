@@ -2,15 +2,16 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useJobs } from "@/lib/contentos/store/useStore";
+import { useJobs, useTrendStore } from "@/lib/contentos/store/useStore";
 import { useRole } from "@/lib/contentos/store/uiStore";
 
 const PRIMARY = [
   { href: "/contentos", label: "Dashboard", ico: "◧", exact: true },
   { href: "/contentos/jobs", label: "My Jobs", ico: "▦" },
   { href: "/contentos/review", label: "Human Review Queue", ico: "⚑", queueKey: "review" },
-  { href: "/contentos/clips", label: "Clip Approval Queue", ico: "▶", queueKey: "clips" },
   { href: "/contentos/exports", label: "Exports", ico: "⤓" },
+  { href: "/contentos/calendar", label: "Content Calendar", ico: "▥" },
+  { href: "/contentos/trends", label: "Trend Signals", ico: "⟳", queueKey: "trends" },
 ];
 
 export function Sidebar() {
@@ -18,8 +19,11 @@ export function Sidebar() {
   const router = useRouter();
   const jobs = useJobs();
   const role = useRole();
-  const reviewCount = jobs.filter((j) => j.state === "HUMAN_REVIEW" || j.state === "HELD").length;
+  const { digests } = useTrendStore();
+  const writtenCount = jobs.filter((j) => j.state === "HUMAN_REVIEW" || j.state === "HELD").length;
   const clipCount = jobs.reduce((n, j) => n + (j.clipApprovalQueue?.filter((e) => e.status === "pending").length ?? 0), 0);
+  const reviewCount = writtenCount + clipCount;
+  const trendCount = digests[0]?.signals.filter((s) => s.relevanceScore >= 8.5).length ?? 0;
 
   const isActive = (href: string, exact?: boolean) =>
     exact ? pathname === href : pathname === href || pathname.startsWith(href + "/");
@@ -54,7 +58,7 @@ export function Sidebar() {
               <span className="ico">{n.ico}</span>
               {n.label}
               {n.queueKey === "review" && reviewCount > 0 && <span className="badge">{reviewCount}</span>}
-              {n.queueKey === "clips" && clipCount > 0 && <span className="badge">{clipCount}</span>}
+              {n.queueKey === "trends" && trendCount > 0 && <span className="badge">{trendCount}</span>}
             </Link>
           );
         })}

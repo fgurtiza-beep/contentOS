@@ -35,6 +35,7 @@ import type {
   FactualClaim,
   GenerationCheck,
   GenerationReport,
+  HookAlternative,
   OutlineSection,
   ProductClaim,
   ProductionOutput,
@@ -51,6 +52,7 @@ import { databricksApprovedViewsService } from "../data/databricksApprovedViewsS
 import { complianceReferenceService } from "../data/complianceReferenceService";
 import { block, nextId } from "../util";
 import { buildCanonicalNarrative, buildProblemIntentMap, buildBlueprint } from "./shared";
+import { runHookQACheck } from "./hookScorer";
 
 /** Phrases that are writer instructions, never article copy. Used to strip and to validate. */
 const PLACEHOLDER_PATTERNS: RegExp[] = [
@@ -111,6 +113,112 @@ export function runProductionAgent(brief: StandardizedBrief, riskTier: RiskTier,
   let order = 0;
   const add = (kind: ContentBlock["kind"], text: string) => { if (text && text.trim()) blocks.push(block(order++, kind, scrub(text))); };
 
+  let draftHookScore: number | undefined;
+  let draftHookAlts: HookAlternative[] | undefined;
+
+  if (brief.jobType === "social_post") {
+    // ---- Social post: platform-tailored captions + hook self-check ----
+    const who     = icp?.label ?? brief.persona;
+    const pain    = brief.painPoints[0] ?? "manual compliance pressure";
+    const pain2   = brief.painPoints[1] ?? "growing audit risk";
+    const market  = `Philippine ${brief.industry || "market"}`;
+    const product = brief.product ? gtmStudioProductService.getProduct(brief.product) : undefined;
+    const cap     = product?.facts.find((f) => f.fieldType === "capability");
+    const cta     = brief.cta || campaign?.approvedCtas[0] || "Book a demo →";
+    const indTag  = `#${(brief.industry ?? "HR").replace(/\s+/g, "")}`;
+    const year    = new Date(ts).getFullYear();
+
+    if (product && cap) {
+      productClaims.push(gtmStudioProductService.buildClaim(product.slug, cap.id, ts));
+    }
+
+    // Dataset citation if available
+    let dataLine = "";
+    if (brief.datasets.length > 0) {
+      const dv = databricksApprovedViewsService.get(brief.datasets[0]);
+      if (dv) {
+        const guard = databricksApprovedViewsService.citationGuardrails(dv.datasetId);
+        dataLine = `Across ${dv.name} (${dv.dateRange}, n=${dv.sampleSizeN}), Sprout customers saw measurable improvement.`;
+        factualClaims.push({
+          id: nextId("fact"), text: dataLine,
+          status: guard.allowed ? ("verified" as const) : ("human_review" as const),
+          datasetId: dv.datasetId, sourceName: dv.name,
+          dateRange: dv.dateRange, sampleSize: dv.sampleSizeN, note: guard.warnings.join(" "),
+        });
+      }
+    }
+
+    const capLine = cap?.text ?? `${product?.displayName ?? "Sprout"} is built for how PH businesses actually operate.`;
+
+    const platforms = brief.socialPlatforms ?? [];
+
+    if (platforms.length > 0) {
+      // Platform-specific captions — one block per selected platform
+      for (const platform of platforms) {
+        blocks.push(block(order++, "h3", `${platform} caption`));
+        blocks.push(block(order++, "paragraph", buildPlatformCaption(platform, {
+          who, pain, pain2, market, capLine, cta, dataLine, indTag, year,
+        })));
+      }
+    } else {
+      // Generic 3-variant fallback when no platform is chosen
+      const hashtags = `#SproutSolutions #PhilippineHR ${indTag}`;
+
+      blocks.push(block(order++, "h3", "Variant 1 — Awareness Hook"));
+      blocks.push(block(order++, "paragraph",
+        `Still dealing with ${pain} in ${year}?\n\n` +
+        `For ${who} teams in the ${market}, it's not just a time sink — it's a liability.\n\n` +
+        `There's a better way to run compliant, people-first operations.\n\n` +
+        hashtags,
+      ));
+
+      blocks.push(block(order++, "h3", "Variant 2 — Insight / Evidence"));
+      const insightBody = dataLine
+        ? `${dataLine}\n\nWhen ${who} teams stop chasing ${pain2} manually, they get their time back — and their confidence in compliance, too.\n\n`
+        : `${narrative.thesis}\n\nWhen ${who} teams stop chasing ${pain2} manually, they get their time back — and their confidence in compliance, too.\n\n`;
+      blocks.push(block(order++, "paragraph", insightBody + hashtags));
+
+      blocks.push(block(order++, "h3", "Variant 3 — Conversion / CTA"));
+      blocks.push(block(order++, "paragraph",
+        `${capLine}\n\n` +
+        `${who} teams across the ${market} use it to move faster, stay compliant, and put people first.\n\n` +
+        `${cta}\n\n` + hashtags,
+      ));
+    }
+
+    // Compliance disclaimer if needed
+    if (brief.complianceContext || brief.regulatory) {
+      blocks.push(block(order++, "paragraph", complianceReferenceService.disclaimer()));
+    }
+
+    // Product provenance source for any GTM claim made above.
+    if (product && !sourceMap.some((s) => s.ref === product.sourceDocument)) {
+      sourceMap.push({ ref: product.sourceDocument, type: "gtm_studio", anchorText: product.displayName, contextNote: `Retrieved version ${product.retrievedVersion}` });
+    }
+
+    // Hook self-check — simulates the LLM system-prompt instruction:
+    // "Before returning your output, score your opening line on these three criteria…"
+    // If total < 7, swap the first paragraph's opening line with the best alternative.
+    {
+      const icpLabel  = icp?.label ?? brief.persona;
+      const primaryPain = brief.painPoints[0] ?? "";
+      const hookCheck = runHookQACheck(blocks, icpLabel, primaryPain);
+      draftHookAlts   = hookCheck.alternatives;
+
+      if (!hookCheck.pass && hookCheck.alternatives.length > 0) {
+        const best = [...hookCheck.alternatives].sort((a, b) => b.score - a.score)[0];
+        const firstPara = blocks.find(b => b.kind === "paragraph");
+        if (firstPara) {
+          const lines = firstPara.text.split("\n");
+          const idx = lines.findIndex(l => l.trim());
+          if (idx >= 0) { lines[idx] = best.line; firstPara.text = lines.join("\n"); }
+        }
+        draftHookScore = best.score;
+      } else {
+        draftHookScore = hookCheck.totalScore;
+      }
+    }
+  } else {
   // ---- Title + SEO meta ----
   add("h1", brief.title);
   add("meta", `SEO meta title: ${metaTitle(brief)}`);
@@ -183,6 +291,7 @@ export function runProductionAgent(brief: StandardizedBrief, riskTier: RiskTier,
     const p = gtmStudioProductService.getProduct(brief.product);
     if (p && !sourceMap.some((s) => s.ref === p.sourceDocument)) sourceMap.push({ ref: p.sourceDocument, type: "gtm_studio", anchorText: p.displayName, contextNote: `Retrieved version ${p.retrievedVersion}` });
   }
+  }
 
   const draft: Draft = {
     id: nextId("draft"),
@@ -191,6 +300,8 @@ export function runProductionAgent(brief: StandardizedBrief, riskTier: RiskTier,
     format: brief.jobType,
     blocks,
     versions: [{ id: nextId("ver"), label: "original_draft", blocks: blocks.map((b) => ({ ...b })), createdAt: ts, createdBy: "Production Agent" }],
+    hookScore: draftHookScore,
+    hookAlternatives: draftHookAlts,
   };
 
   const internalLinks = sourceMap.filter((s) => s.type === "internal_asset").length;
@@ -200,7 +311,14 @@ export function runProductionAgent(brief: StandardizedBrief, riskTier: RiskTier,
   return {
     brief, riskTier, problemIntentMap: pim, canonicalNarrative: narrative, blueprint, draft,
     productClaims, factualClaims, sourceMap, generationReport,
-    qaHandoffPackage: { riskTier, productClaims, factualClaims, sourceMap, references: [tone, ...sourceMap.map((s) => s.ref)] },
+    qaHandoffPackage: {
+      riskTier, productClaims, factualClaims, sourceMap, references: [tone, ...sourceMap.map((s) => s.ref)],
+      ...(brief.jobType === "social_post" && {
+        agentHookScore: draftHookScore,
+        agentHookAlternatives: draftHookAlts,
+        socialContext: { icp: icp?.label ?? brief.persona, primaryPain: brief.painPoints[0] ?? "" },
+      }),
+    },
   };
 }
 
@@ -510,3 +628,90 @@ function tidyQuestion(q: string): string { const t = q.trim().replace(/\s+/g, " 
 function shorten(s: string, n: number): string { const t = s.replace(/\s+/g, " ").trim(); return t.length <= n ? t : t.slice(0, n - 1).trimEnd() + "…"; }
 function similar(a: string, b: string): boolean { if (a.includes(b) || b.includes(a)) return true; const aw = new Set(a.split(/\s+/).filter((w) => w.length > 3)); const bw = b.split(/\s+/).filter((w) => w.length > 3); const hits = bw.filter((w) => aw.has(w)).length; return bw.length > 0 && hits / bw.length >= 0.5; }
 function parseTarget(s?: string): number | null { if (!s) return null; const m = s.replace(/,/g, "").match(/(\d{3,5})/); return m ? parseInt(m[1], 10) : null; }
+
+function truncate(s: string, n: number): string {
+  return s.length <= n ? s : s.slice(0, n - 1) + "…";
+}
+
+interface PlatformCaptionCtx {
+  who: string; pain: string; pain2: string; market: string;
+  capLine: string; cta: string; dataLine: string; indTag: string; year: number;
+}
+
+function buildPlatformCaption(platform: string, c: PlatformCaptionCtx): string {
+  const { who, pain, pain2, market, capLine, cta, dataLine, indTag, year } = c;
+
+  switch (platform) {
+    case "LinkedIn": {
+      // Professional, thought-leadership tone. ~700 chars. 3–5 hashtags.
+      const evidence = dataLine || `${who} teams in the ${market} are still spending hours on ${pain2} — manually.`;
+      return [
+        `Still dealing with ${pain} in ${year}?`,
+        "",
+        `For ${who} teams in the ${market}, it's not just inefficiency — it's a compliance risk that compounds every pay cycle.`,
+        "",
+        evidence,
+        "",
+        capLine,
+        "",
+        `${cta}`,
+        "",
+        `#SproutSolutions #PhilippineHR #HRTech ${indTag} #PayrollCompliance`,
+      ].join("\n");
+    }
+
+    case "Facebook": {
+      // Conversational, community-focused. ~400 chars. 1–2 hashtags.
+      return [
+        `Quick question for HR managers in the Philippines 👋`,
+        "",
+        `How much time does your team spend on ${pain} every month?`,
+        "",
+        `For most ${who} teams, it's more than it should be — and it's pulling attention away from your people.`,
+        "",
+        `There's a better way. ${capLine}`,
+        "",
+        `Want to see how? ${cta}`,
+        "",
+        `#SproutSolutions ${indTag}`,
+      ].join("\n");
+    }
+
+    case "Instagram": {
+      // Visual-first. Short hook visible above fold (~150 chars). 5–10 hashtags below.
+      const hook = `${pain} is costing PH HR teams more than they think. 👇`;
+      const body = `${who} teams deserve tools that work as hard as they do.\n\n${capLine}\n\nLink in bio → ${cta}`;
+      const tags = [
+        "#SproutSolutions", "#PhilippineHR", "#HRTech", "#PayrollPH",
+        "#HRManager", "#WorkforcePH", `${indTag}`, "#CompliancePH",
+        "#HRLife", "#PeopleFirst",
+      ].join(" ");
+      return `${hook}\n\n${body}\n\n.\n.\n.\n${tags}`;
+    }
+
+    case "X": {
+      // 280 char hard limit. Punchy. 1–2 hashtags included in count.
+      const base = `${pain} is still manual for most PH HR teams in ${year}. ${capLine} ${cta} #SproutSolutions ${indTag}`;
+      return truncate(base, 280);
+    }
+
+    case "Threads": {
+      // Casual, authentic. ~500 chars. Minimal hashtags.
+      return [
+        `Hot take: most ${who} teams in the Philippines aren't struggling with ${pain} because they're bad at HR.`,
+        "",
+        `They're struggling because their tools haven't caught up with how PH compliance actually works.`,
+        "",
+        `${capLine}`,
+        "",
+        `What's one thing you'd automate first if you could?`,
+      ].join("\n");
+    }
+
+    default: {
+      // Generic fallback for unknown platforms
+      const hashtags = `#SproutSolutions #PhilippineHR ${indTag}`;
+      return `Still dealing with ${pain} in ${year}?\n\n${capLine}\n\n${cta}\n\n${hashtags}`;
+    }
+  }
+}

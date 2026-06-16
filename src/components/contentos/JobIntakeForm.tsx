@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { jobStore } from "@/lib/contentos/store/useStore";
 import { CURRENT_USER } from "@/lib/contentos/store/uiStore";
 import {
@@ -24,10 +24,20 @@ import { Stepper, AccordionSection, MultiSelect } from "./ui";
 import { extractBriefFromFile, extractBriefFromText, extractTextFromFile, type ExtractedBrief } from "@/lib/contentos/intake/briefExtractor";
 import { suggestDerivatives, planToDesiredOutputs, FORMAT_CATALOG, makeDerivFromCatalog, type DerivItem } from "@/lib/contentos/intake/repurposePlan";
 
+// Platform targeting for social posts — captions are tailored per platform by the production agent.
+export const SOCIAL_PLATFORMS = [
+  { id: "LinkedIn",  icon: "in", color: "#0077b5", bestPracticeChars: 700,  charLimit: 3000 },
+  { id: "Facebook",  icon: "f",  color: "#1877f2", bestPracticeChars: 400,  charLimit: 63206 },
+  { id: "Instagram", icon: "ig", color: "#e1306c", bestPracticeChars: 150,  charLimit: 2200 },
+  { id: "X",         icon: "𝕏",  color: "#000000", bestPracticeChars: 280,  charLimit: 280 },
+  { id: "Threads",   icon: "@",  color: "#000000", bestPracticeChars: 500,  charLimit: 500 },
+];
+
 const REPURPOSE_CHANNELS = ["LinkedIn", "X", "Instagram", "Email", "Blog"];
 const NONE_PRODUCT = "__none__";
 const MAX_BLOGS = 5;
 const COMPANY_SIZES = ["SME", "ENT", "General"];
+
 
 const splitList = (s: string) => s.split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
 
@@ -45,9 +55,15 @@ type Step = "lane" | "type" | "brief";
 
 export function JobIntakeForm() {
   const router = useRouter();
-  const [step, setStep] = useState<Step>("lane");
-  const [lane, setLane] = useState<AgentLane | null>(null);
-  const [jobType, setJobType] = useState<JobType | null>(null);
+  const searchParams = useSearchParams();
+
+  const initialLane   = (searchParams.get("lane") as AgentLane | null) ?? null;
+  const initialType   = (searchParams.get("type") as JobType | null) ?? null;
+  const initialStep: Step = initialLane && initialType ? "brief" : initialLane ? "type" : "lane";
+
+  const [step, setStep] = useState<Step>(initialStep);
+  const [lane, setLane] = useState<AgentLane | null>(initialLane);
+  const [jobType, setJobType] = useState<JobType | null>(initialType);
 
   const onDone = (ids: string[]) => router.push(ids.length === 1 ? `/contentos/jobs/${ids[0]}` : `/contentos/jobs`);
 
@@ -149,9 +165,15 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
   const products = gtmStudioProductService.listProducts();
   const icps = icpKnowledgeService.list();
 
+  // ---- Trend Signal pre-fill (deep-linked from the Trends panel) ----
+  const searchParams = useSearchParams();
+  const trendTopic = searchParams.get("trend") ?? "";
+  const trendAngle = searchParams.get("angle") ?? "";
+  const [trendBannerDismissed, setTrendBannerDismissed] = useState(false);
+
   // ---- Essentials ----
-  const [title, setTitle] = useState("");
-  const [objective, setObjective] = useState("");
+  const [title, setTitle] = useState(trendTopic);
+  const [objective, setObjective] = useState(trendAngle);
   const [amount, setAmount] = useState(1);
   const [items, setItems] = useState<BlogItem[]>([{ title: "", notes: "" }]);
   const [titleOptions, setTitleOptions] = useState<string[]>([]);
@@ -186,6 +208,8 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
     competitorName: "", allowedToName: false, differentiationPillars: "",
     mustCite: true, requiredSources: "",
     channelQtys: { LinkedIn: 3, X: 0, Instagram: 0, Email: 1, Blog: 0 } as Record<string, number>,
+    socialPlatforms: ["LinkedIn"] as string[],
+    contentPillar: "",
   });
   const setAk = (k: keyof typeof a, v: unknown) => setA((p) => ({ ...p, [k]: v }));
 
@@ -405,6 +429,7 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
       regulatory: isRegulatory ? { issuingBody: a.issuingBody, effectiveDate: a.effectiveDate, affectedAudience: "", uncertaintyAreas: "", legalReviewNeeded: a.legalReviewNeeded, sproutCTAAllowed: true } : undefined,
       competitorAddendum: isCompetitorType || competitorForBrief ? { competitorName: a.competitorName || competitorForBrief, allowedToNameCompetitor: a.allowedToName, comparisonsPermitted: false, differentiationPillars: splitList(a.differentiationPillars), prohibitedClaims: ["pricing", "security", "uptime"] } : undefined,
       research: jobType === "convert_external_report" ? { mustCite: a.mustCite, directQuotesAllowed: false, dataMisrepresentationRisks: "", requiredSources: splitList(a.requiredSources) } : undefined,
+      socialPlatforms: jobType === "social_post" && a.socialPlatforms.length > 0 ? a.socialPlatforms : undefined,
       ...overrides,
     };
   }
@@ -427,6 +452,28 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
 
   return (
     <div className="builder" style={{ maxWidth: 720 }}>
+      {trendTopic && !trendBannerDismissed && (
+        <div style={{
+          background: "#8139ee18", border: "1px solid #8139ee44", borderRadius: 8,
+          padding: "10px 14px", marginBottom: 16,
+          display: "flex", gap: 10, alignItems: "flex-start",
+        }}>
+          <span style={{ fontSize: 14, flexShrink: 0 }}>⟳</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#8139ee", marginBottom: 2 }}>
+              Pre-filled from Trend Signal
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
+              <b>Topic:</b> {trendTopic}
+              {trendAngle && <><br /><b>Angle:</b> {trendAngle}</>}
+            </div>
+          </div>
+          <button onClick={() => setTrendBannerDismissed(true)}
+            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-faint)", fontSize: 16, lineHeight: 1, padding: 0 }}>
+            ×
+          </button>
+        </div>
+      )}
       {/* ===== Upload / paste / manual ===== */}
       {!isRepurpose && !isVideoIntel && (
         <>
@@ -500,6 +547,7 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
                   <option value="youtube">YouTube</option>
                   <option value="loom">Loom</option>
                   <option value="vimeo">Vimeo</option>
+                  <option value="google_drive">Google Drive</option>
                   <option value="transcript_upload">Upload transcript</option>
                 </select>
               </div>
@@ -511,7 +559,7 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
             {a.vidUrlType !== "transcript_upload" && (
               <div className="field">
                 <label>Video URL</label>
-                <input type="text" value={a.vidUrl} onChange={(e) => setAk("vidUrl", e.target.value)} placeholder={a.vidUrlType === "youtube" ? "https://youtube.com/watch?v=..." : a.vidUrlType === "loom" ? "https://www.loom.com/share/..." : "https://vimeo.com/..."} />
+                <input type="text" value={a.vidUrl} onChange={(e) => setAk("vidUrl", e.target.value)} placeholder={a.vidUrlType === "youtube" ? "https://youtube.com/watch?v=..." : a.vidUrlType === "loom" ? "https://www.loom.com/share/..." : a.vidUrlType === "google_drive" ? "https://drive.google.com/file/d/..." : "https://vimeo.com/..."} />
               </div>
             )}
             <div className="field">
@@ -613,6 +661,47 @@ function BriefForm({ jobType, lane, onDone }: { jobType: JobType; lane: AgentLan
           <div className="callout listicle-block">
             <div className="row"><div className="field"><label>Number of items <span className="hint">· up to 20</span></label><Stepper value={listCount} min={1} max={20} onChange={setListCount} /></div></div>
             <div className="field"><label>Companies / solutions to feature</label><textarea value={featured} onChange={(e) => setFeatured(e.target.value)} placeholder={"One per line:\nSprout\nDarwinbox\nWorkday"} /></div>
+          </div>
+        )}
+
+        {jobType === "social_post" && (
+          <div className="field">
+            <label>Platforms <span className="faint tiny" style={{ fontWeight: 400 }}>— captions will be tailored per platform</span></label>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+              {SOCIAL_PLATFORMS.map((p) => {
+                const selected = a.socialPlatforms.includes(p.id);
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setAk("socialPlatforms", selected
+                      ? a.socialPlatforms.filter((x) => x !== p.id)
+                      : [...a.socialPlatforms, p.id]
+                    )}
+                    style={{
+                      padding: "5px 12px", borderRadius: 20, border: "1px solid",
+                      borderColor: selected ? p.color : "var(--border)",
+                      background: selected ? p.color + "18" : "transparent",
+                      color: selected ? p.color : "var(--text-faint)",
+                      fontSize: 12, fontWeight: selected ? 700 : 400, cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: 5,
+                    }}
+                  >
+                    <span>{p.icon}</span>
+                    <span>{p.id}</span>
+                    {selected && <span style={{ fontSize: 10 }}>✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+            {a.socialPlatforms.length > 0 && (
+              <div className="faint tiny" style={{ marginTop: 6 }}>
+                {a.socialPlatforms.map((p) => {
+                  const spec = SOCIAL_PLATFORMS.find((s) => s.id === p);
+                  return spec ? `${p}: ~${spec.bestPracticeChars} chars` : p;
+                }).join(" · ")}
+              </div>
+            )}
           </div>
         )}
 
