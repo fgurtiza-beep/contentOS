@@ -12,14 +12,16 @@ export interface ComplianceReference {
   topic: string;
   summary: string;
   note: string;
+  /** Authoritative government source URL for external citations. */
+  url: string;
 }
 
 const REFERENCES: ComplianceReference[] = [
-  { body: "DOLE", topic: "Labor standards", summary: "Minimum labor standards, holiday pay, overtime, night differential rules.", note: "Reference only. Not legal advice." },
-  { body: "BIR", topic: "Withholding tax / 2316 / Alphalist", summary: "Year-end tax reconciliation, annualization, and statutory reporting.", note: "Reference only. Not legal advice." },
-  { body: "SSS", topic: "Social security contributions", summary: "Employer/employee contribution schedules and remittance.", note: "Reference only. Not legal advice." },
-  { body: "PhilHealth", topic: "Health insurance contributions", summary: "Contribution tables and reporting obligations.", note: "Reference only. Not legal advice." },
-  { body: "Pag-IBIG", topic: "Housing fund contributions", summary: "Contribution and remittance obligations.", note: "Reference only. Not legal advice." },
+  { body: "DOLE", topic: "Labor standards", summary: "Minimum labor standards, holiday pay, overtime, night differential rules.", note: "Reference only. Not legal advice.", url: "https://www.dole.gov.ph/" },
+  { body: "BIR", topic: "Withholding tax / 2316 / Alphalist", summary: "Year-end tax reconciliation, annualization, and statutory reporting.", note: "Reference only. Not legal advice.", url: "https://www.bir.gov.ph/" },
+  { body: "SSS", topic: "Social security contributions", summary: "Employer/employee contribution schedules and remittance.", note: "Reference only. Not legal advice.", url: "https://www.sss.gov.ph/" },
+  { body: "PhilHealth", topic: "Health insurance contributions", summary: "Contribution tables and reporting obligations.", note: "Reference only. Not legal advice.", url: "https://www.philhealth.gov.ph/" },
+  { body: "Pag-IBIG", topic: "Housing fund contributions", summary: "Contribution and remittance obligations.", note: "Reference only. Not legal advice.", url: "https://www.pagibigfund.gov.ph/" },
 ];
 
 export const NON_LEGAL_ADVICE_DISCLAIMER =

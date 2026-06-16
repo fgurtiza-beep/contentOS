@@ -3,25 +3,26 @@
 import React, { Fragment, useState } from "react";
 import Link from "next/link";
 import { useJob } from "@/lib/contentos/store/useStore";
+import { useRole } from "@/lib/contentos/store/uiStore";
 import { primaryDraft } from "@/lib/contentos/orchestrator/contentOrchestrator";
 import { WorkflowStepper } from "./WorkflowStepper";
-import { AgentWorkflowProgress } from "./AgentWorkflowProgress";
 import { CanonicalNarrativePanel } from "./CanonicalNarrativePanel";
 import { BlueprintPanel } from "./BlueprintPanel";
 import { ClaimsPanel } from "./AgentOutputPanel";
 import { DraftView } from "./DraftEditor";
-import { QAReviewWorkspace } from "./QAReviewWorkspace";
+import { StakeholderReview } from "./StakeholderReview";
 import { ExportPanel } from "./ExportPanel";
 import { AuditTrail } from "./AuditTrail";
 import { RiskBadge, StateBadge, ScorePill } from "./badges";
 import { JOB_TYPES } from "@/lib/contentos/schemas/contentos";
 import type { EditorBrief } from "@/lib/contentos/schemas/contentos";
 
-type Tab = "overview" | "agent" | "qa" | "export" | "audit";
+type Tab = "overview" | "agent" | "export" | "audit";
 
 export function JobWorkspace({ id }: { id: string }) {
   const job = useJob(id);
-  const [tab, setTab] = useState<Tab>("qa");
+  const role = useRole();
+  const [adminOpen, setAdminOpen] = useState(false);
 
   if (!job) {
     return (
@@ -33,6 +34,31 @@ export function JobWorkspace({ id }: { id: string }) {
     );
   }
 
+  return (
+    <div className="content wide">
+      <Link href="/contentos" className="tiny faint">← Workspace</Link>
+      {/* Stakeholder-facing: simple draft review. No risk tiers, workflow bars, or routing. */}
+      <StakeholderReview job={job} />
+
+      {/* Admin View only: the full production machinery, collapsed by default. */}
+      {role === "admin" && (
+        <div className="admin-details">
+          <button className="admin-toggle" onClick={() => setAdminOpen((o) => !o)}>
+            {adminOpen ? "▾" : "▸"} Admin view — full production detail (risk, agents, audit, export)
+          </button>
+          {adminOpen && <AdminDetails id={id} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminDetails({ id }: { id: string }) {
+  const job = useJob(id);
+  const [tab, setTab] = useState<Tab>(job?.qaOnly ? "export" : "agent");
+  const [pipelineOpen, setPipelineOpen] = useState(false);
+  if (!job) return null;
+
   const report = job.finalQaReport ?? job.qaReport;
   const jobTypeLabel = JOB_TYPES.find((t) => t.value === job.brief.jobType)?.label ?? job.brief.jobType;
   const prod = job.production;
@@ -42,13 +68,11 @@ export function JobWorkspace({ id }: { id: string }) {
   const pim = prod?.problemIntentMap ?? rep?.pim;
 
   return (
-    <div className="content wide">
-      <div className="page-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
-        <div style={{ minWidth: 0 }}>
-          <Link href="/contentos" className="tiny faint">← Workspace</Link>
-          <h1 style={{ marginTop: 4 }}>{job.brief.title}</h1>
-          <p style={{ marginTop: 4 }}>{jobTypeLabel} · {job.lane} agent · {job.brief.primaryICP} · owner {job.owner.split("@")[0]}</p>
-        </div>
+    <div style={{ marginTop: 16 }}>
+      <div className="admin-explain">Engineering detail — the agent pipeline, risk tiering, audit trail and export. QA &amp; editing live in the review above; this is not stakeholder-facing.</div>
+
+      <div className="admin-meta">
+        <span className="tiny faint">{jobTypeLabel} · {job.lane} agent · {job.brief.primaryICP} · owner {job.owner.split("@")[0]}</span>
         <div className="btn-row">
           {report && <ScorePill score={report.overallScore} />}
           <RiskBadge tier={job.risk?.tier ?? null} />
@@ -56,24 +80,19 @@ export function JobWorkspace({ id }: { id: string }) {
         </div>
       </div>
 
-      <div className="qa-split" style={{ gridTemplateColumns: "1fr 300px", marginBottom: 16 }}>
-        <div className="panel panel-pad">
-          <h3 style={{ marginBottom: 12, fontSize: 13 }}>Lifecycle</h3>
-          <WorkflowStepper state={job.state} />
-        </div>
-        <AgentWorkflowProgress job={job} />
-      </div>
-
       {job.risk && (
-        <div className={`callout ${job.risk.tier === 2 ? "danger" : job.risk.tier === 1 ? "warn" : ""}`} style={{ marginBottom: 16 }}>
+        <div className={`callout ${job.risk.tier === 2 ? "danger" : job.risk.tier === 1 ? "warn" : ""}`} style={{ marginBottom: 12 }}>
           <b>Risk {job.risk.tier}.</b> {job.risk.rationale}
-          <ul className="bullets" style={{ marginBottom: 0 }}>{job.risk.signals.map((s, i) => <li key={i} className="tiny">{s}</li>)}</ul>
         </div>
       )}
 
+      <button className="cov-toggle" style={{ marginBottom: 12 }} onClick={() => setPipelineOpen((o) => !o)}>
+        {pipelineOpen ? "▾" : "▸"} Pipeline state
+      </button>
+      {pipelineOpen && <div className="panel panel-pad" style={{ marginBottom: 16 }}><WorkflowStepper state={job.state} /></div>}
+
       <div className="tabs">
         {(([
-          ["qa", "QA review"],
           !job.qaOnly && ["agent", "Agent outputs"],
           !job.qaOnly && ["overview", "Brief"],
           ["export", "Export"],
@@ -82,8 +101,6 @@ export function JobWorkspace({ id }: { id: string }) {
           <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{label}</button>
         ))}
       </div>
-
-      {tab === "qa" && <QAReviewWorkspace job={job} onGoExport={() => setTab("export")} />}
 
       {tab === "agent" && (
         <div className="grid" style={{ gap: 16 }}>

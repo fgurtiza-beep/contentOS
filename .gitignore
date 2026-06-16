@@ -11,3 +11,6 @@ next-env.d.ts
 /*.pdf
 /*.zip
 .vercel
+
+# Binary context PDFs (kept as reference in repo root only, gitignored there too)
+docs/context/*.pdf

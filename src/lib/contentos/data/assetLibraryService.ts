@@ -18,13 +18,16 @@ export interface LibraryAsset {
   icpTags: string[];
 }
 
+// REAL, verified Sprout URLs (checked live — no invented paths). If you add an
+// asset, confirm the URL returns 200 before listing it here.
 const ASSETS: LibraryAsset[] = [
-  { id: "a1", title: "State of HR in the Philippines 2026", type: "report", url: "https://sprout.ph/resources/state-of-hr-2026", summary: "Annual benchmark on PH HR priorities, payroll, and compliance.", topics: ["compliance", "payroll", "people strategy"], icpTags: ["chro", "ceo_owner"] },
-  { id: "a2", title: "A practical 13th month pay checklist", type: "blog", url: "https://sprout.ph/blog/13th-month-pay-checklist", summary: "Step-by-step guide to computing and filing 13th month pay.", topics: ["payroll", "compliance", "annualization"], icpTags: ["sme_hr", "comp_ben"] },
-  { id: "a3", title: "Sprout Payroll product page", type: "product_page", url: "https://sprout.ph/payroll", summary: "Automated PH-compliant payroll overview.", topics: ["payroll", "statutory compliance"], icpTags: ["sme_hr", "comp_ben"] },
-  { id: "a4", title: "How automation removed 700+ monthly timekeeping errors", type: "blog", url: "https://sprout.ph/blog/timekeeping-automation", summary: "Case-driven look at attendance and timekeeping automation.", topics: ["timekeeping", "automation"], icpTags: ["sme_hr"] },
-  { id: "a5", title: "Webinar: Reducing payroll disputes with a single source of truth", type: "webinar", url: "https://sprout.ph/webinars/payroll-disputes", summary: "On-demand session on syncing time and payroll.", topics: ["payroll", "single source of truth"], icpTags: ["chro", "comp_ben"] },
-  { id: "a6", title: "Financial wellness and retention: the ReadyCash story", type: "blog", url: "https://sprout.ph/blog/financial-wellness-retention", summary: "How salary advance benefits affect turnover.", topics: ["financial wellness", "retention", "readycash"], icpTags: ["chro", "ceo_owner"] },
+  { id: "a1", title: "How to procure HR & payroll software for Philippine companies", type: "blog", url: "https://sprout.ph/articles/procure-hr-payroll-software-philippine-companies/", summary: "A buyer's guide to evaluating HR and payroll software in the PH.", topics: ["payroll", "software", "procurement", "compliance"], icpTags: ["sme_hr", "comp_ben", "chro"] },
+  { id: "a2", title: "How to evaluate a managed payroll provider in the Philippines", type: "blog", url: "https://sprout.ph/articles/evaluate-managed-payroll-provider-philippines/", summary: "What to look for when outsourcing payroll to a managed provider.", topics: ["payroll", "outsourcing", "managed payroll", "compliance"], icpTags: ["sme_hr", "chro", "ceo_owner"] },
+  { id: "a3", title: "What is an HRIS and why do you need one?", type: "blog", url: "https://sprout.ph/articles/what-is-an-hris-why-do-you-need-one/", summary: "A plain explainer of HR information systems for growing PH teams.", topics: ["hris", "hr visibility", "reporting", "scaling"], icpTags: ["sme_hr", "chro"] },
+  { id: "a4", title: "Sprout Payroll (Payroll Management)", type: "product_page", url: "https://sprout.ph/product/payroll-management", summary: "Automated, PH-compliant payroll software.", topics: ["payroll", "statutory compliance", "automation"], icpTags: ["sme_hr", "comp_ben"] },
+  { id: "a5", title: "Sprout Payroll Outsourcing", type: "product_page", url: "https://sprout.ph/product/payroll-outsourcing", summary: "Managed payroll service on the Sprout platform.", topics: ["payroll", "outsourcing", "managed payroll"], icpTags: ["sme_hr", "chro"] },
+  { id: "a6", title: "Philippine business compliance hub", type: "landing_page", url: "https://sprout.ph/philippines-business-compliance", summary: "Resources on PH statutory and labor compliance.", topics: ["compliance", "statutory", "dole", "bir", "13th month"], icpTags: ["chro", "comp_ben", "sme_hr"] },
+  { id: "a7", title: "How AI is reshaping Philippine business in 2026", type: "blog", url: "https://sprout.ph/articles/ai-reshaping-philippine-business-2026/", summary: "Trends on AI adoption across PH HR and operations.", topics: ["ai", "automation", "people strategy", "adoption"], icpTags: ["chro", "ceo_owner"] },
 ];
 
 export const assetLibraryService = {

@@ -16,55 +16,30 @@ export interface BrandVoice {
 }
 
 /** Appendix A — Cliché & Buzzword Watchlist (from the Sprout QA Workflow). */
+// Reproduced verbatim from Appendix A of the [NEW] QA Bot Workflow. Matched with
+// word boundaries (see scanCliches) so "align" doesn't trip on "alignment".
 export const CLICHE_WATCHLIST: string[] = [
   // Generic / overused phrases
-  "in the fast-paced world of",
-  "in the ever-changing world of",
-  "in conclusion",
-  "firstly",
-  "secondly",
-  "thirdly",
-  "at the heart of",
-  "lies in",
-  "looking ahead",
-  "in the realm of",
-  "in the world of",
-  "in the landscape of",
-  "stemming from",
-  "embarked on",
-  "expansive",
-  "not resting on its laurels",
-  "underscore",
-  "underscores",
-  "underscored",
-  "underscoring",
+  "in the fast-paced world of", "in the ever-changing world of", "in conclusion",
+  "firstly", "secondly", "thirdly", "at the heart of", "lies in", "looking ahead",
+  "in the realm of", "in the world of", "in the landscape of", "stemming from",
+  "embarked on", "expansive", "not resting on its laurels", "this article",
+  "this statement", "underscore",
   // Empty descriptors & adjectives
-  "innovative",
-  "powerful",
-  "the power of",
-  "harness the power of",
-  "seamless",
-  "effortless",
-  "intuitive",
-  "best-in-class",
-  "transformative",
-  "future-proof",
-  "revolutionary",
-  "revolutionizes",
-  "game-changer",
-  "gamechanger",
-  "pioneering",
-  "boundary-pushing",
-  "changemaker",
-  "meteoric",
-  // Common buzz verbs (overused in AI content)
-  "streamline",
-  "optimize",
-  "elevate",
-  "leverage",
-  "supercharge",
-  "unlock",
-  "unleash",
+  "innovative", "powerful", "the power of", "harness the power of", "seamless",
+  "effortless", "intuitive", "best-in-class", "transformative", "future-proof",
+  "revolutionary", "revolutionizes", "evolutionary", "game-changer", "gamechanger",
+  "pioneering", "boundary-pushing", "changemaker", "meteoric",
+  // Buzz verbs (overused in AI content)
+  "streamline", "optimize", "enhance", "elevate", "refine", "maximize",
+  "leverage", "amplify", "propel", "catalyze", "supercharge", "unlock", "unleash",
+  // Tone & style clichés
+  "impactful", "best-in-class",
+  // Team & communication clichés
+  "touch base", "circle back",
+  // Value / results buzzwords
+  "value-driven", "results-oriented", "scalable", "high-impact", "goal-aligned",
+  "holistic", "robust", "future-proof",
 ];
 
 /** Formulaic sentence pattern the QA framework explicitly flags. */
@@ -115,10 +90,15 @@ export const brandKnowledgeService = {
   getStyleRules() {
     return STYLE_RULES;
   },
-  /** Returns the clichés found in a piece of text. */
+  /** Returns the Appendix-A clichés found, matched at word boundaries (with common
+   * inflections) so "align" doesn't trip on "alignment" nor "underscore" on a noun. */
   scanCliches(text: string): string[] {
-    const lower = text.toLowerCase();
-    return CLICHE_WATCHLIST.filter((c) => lower.includes(c));
+    return CLICHE_WATCHLIST.filter((c) => {
+      const esc = c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      // Single words allow plural/tense suffixes; phrases match as-is.
+      const pattern = /\s/.test(c) ? `\\b${esc}\\b` : `\\b${esc}(s|d|es|ed|ing)?\\b`;
+      return new RegExp(pattern, "i").test(text);
+    });
   },
   scanFormulaic(text: string): string[] {
     return FORMULAIC_PATTERNS.filter((p) => p.test.test(text)).map((p) => p.label);

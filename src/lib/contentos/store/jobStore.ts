@@ -34,6 +34,8 @@ import {
   primaryDraft,
   writeDraftBack,
 } from "../orchestrator/contentOrchestrator";
+import { regenerateSectionBody, validateDraft, deriveHandoffFromBlocks } from "../agents/productionAgent";
+import { findSimulatedQA } from "../agents/devFixtures";
 import { assessRisk } from "../orchestrator/riskTiering";
 import { runQAAgent } from "../agents/qaAgent";
 import { runHookQACheck } from "../agents/hookScorer";
@@ -187,6 +189,7 @@ export const jobStore = {
       productClaims,
       factualClaims: [],
       sourceMap: [],
+      generationReport: { passed: true, checks: [], missing: [], internalLinks: 0, externalSources: 0 },
       qaHandoffPackage: { riskTier: risk.tier, productClaims, factualClaims: [], sourceMap: [], references: [] },
     };
 
@@ -314,6 +317,218 @@ export const jobStore = {
     if (job.state === "QA_REVIEW_READY" || job.state === "QA_PASSED") job.state = "CHANGES_PENDING";
     job.updatedAt = now();
     record({ jobId, actor, action: "manual_edit", detail: `Edited ${blk.kind} block directly.`, meta: { blockId } });
+    replaceJob(job);
+  },
+
+  /**
+   * Replace the article BODY blocks from the WYSIWYG editor (autosave).
+   * Preserves meta + cta blocks. Does NOT bump draftRevision (so the editor
+   * isn't remounted by its own save).
+   */
+  replaceDraftBlocks(jobId: string, body: { kind: ContentBlock["kind"]; text: string }[], actor = "marketing@sprout.ph", draftId?: string) {
+    const job = clone(this.getJob(jobId));
+    if (!job) return;
+    const draft = draftId ? (job.repurposing?.derivatives.find((d) => d.id === draftId) ?? primaryDraft(job)) : primaryDraft(job);
+    if (!draft) return;
+    const meta = draft.blocks.filter((b) => b.kind === "meta");
+    const cta = draft.blocks.filter((b) => b.kind === "cta");
+    const newBody = body.map((b) => ({ id: nextId("blk"), order: 0, kind: b.kind, text: b.text }));
+    draft.blocks = [...meta, ...newBody, ...cta];
+    draft.blocks.forEach((b, i) => (b.order = i));
+    writeDraftBack(job, draft);
+    if (job.state === "QA_REVIEW_READY" || job.state === "QA_PASSED") job.state = "CHANGES_PENDING";
+    job.updatedAt = now();
+    replaceJob(job);
+  },
+
+  /* ---------------- Stakeholder draft actions ---------------------- */
+
+  /** Regenerate the body of one section (between a heading block and the next). */
+  regenerateSection(jobId: string, headingBlockId: string, actor = "marketing@sprout.ph") {
+    const job = clone(this.getJob(jobId));
+    if (!job || job.lane !== "production") return;
+    const draft = primaryDraft(job);
+    if (!draft) return;
+    const idx = draft.blocks.findIndex((b) => b.id === headingBlockId);
+    if (idx < 0) return;
+    const heading = draft.blocks[idx].text;
+    // Span = paragraph/list/cta blocks until the next heading.
+    let end = idx + 1;
+    while (end < draft.blocks.length && !["h1", "h2", "h3"].includes(draft.blocks[end].kind)) end++;
+    const newParas = regenerateSectionBody(job.brief, heading, now());
+    if (newParas.length === 0) return;
+    const newBlocks = newParas.map((text, i) => ({ id: nextId("blk"), order: draft.blocks[idx].order + i + 1, kind: "paragraph" as const, text }));
+    draft.blocks = [...draft.blocks.slice(0, idx + 1), ...newBlocks, ...draft.blocks.slice(end)];
+    draft.blocks.forEach((b, i) => (b.order = i));
+    pushVersion(draft, "user_approved", actor);
+    writeDraftBack(job, draft);
+    if (job.state === "QA_PASSED") job.state = "CHANGES_PENDING";
+    job.draftRevision = (job.draftRevision ?? 0) + 1;
+    job.updatedAt = now();
+    record({ jobId, actor, action: "regenerate_section", detail: `Regenerated section "${heading.slice(0, 60)}" from the brief.` });
+    replaceJob(job);
+  },
+
+  /** Append a new section (heading + brief-derived body) before the CTA. */
+  appendSection(jobId: string, heading: string, actor = "marketing@sprout.ph") {
+    const job = clone(this.getJob(jobId));
+    if (!job || job.lane !== "production") return;
+    const draft = primaryDraft(job);
+    if (!draft) return;
+    const clean = heading.replace(/^h[1-3]:?\s*/i, "").trim();
+    const body = regenerateSectionBody(job.brief, heading, now());
+    const ctaIdx = draft.blocks.findIndex((b) => b.kind === "cta");
+    const insertAt = ctaIdx >= 0 ? ctaIdx : draft.blocks.length;
+    const newBlocks = [
+      { id: nextId("blk"), order: 0, kind: "h2" as const, text: clean },
+      ...body.map((text) => ({ id: nextId("blk"), order: 0, kind: "paragraph" as const, text })),
+    ];
+    draft.blocks = [...draft.blocks.slice(0, insertAt), ...newBlocks, ...draft.blocks.slice(insertAt)];
+    draft.blocks.forEach((b, i) => (b.order = i));
+    pushVersion(draft, "user_approved", actor);
+    writeDraftBack(job, draft);
+    if (job.state === "QA_PASSED") job.state = "CHANGES_PENDING";
+    job.draftRevision = (job.draftRevision ?? 0) + 1;
+    job.updatedAt = now();
+    record({ jobId, actor, action: "append_section", detail: `Added section "${clean.slice(0, 60)}".` });
+    replaceJob(job);
+  },
+
+  /**
+   * Upgrade the draft from the deterministic writer to a real Claude-written
+   * article via /api/generate. No-ops (status "fallback") when no API key.
+   */
+  /** Reset and re-attempt real generation (e.g. after adding a key). */
+  retryLLM(jobId: string) {
+    const job = clone(this.getJob(jobId));
+    if (!job) return;
+    job.llmStatus = undefined;
+    job.llmReason = undefined;
+    job.llmMessage = undefined;
+    job.llmIssues = undefined;
+    replaceJob(job);
+    void this.enhanceWithLLM(jobId);
+  },
+
+  async enhanceWithLLM(jobId: string) {
+    const cur = this.getJob(jobId);
+    if (!cur || cur.lane !== "production" || cur.qaOnly) return;
+    if (cur.llmStatus === "writing" || cur.llmStatus === "done") return;
+
+    let job = clone(this.getJob(jobId));
+    if (!job) return;
+    job.llmStatus = "writing";
+    job.updatedAt = now();
+    replaceJob(job);
+
+    try {
+      const res = await fetch("/api/generate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ brief: cur.brief }) });
+      const data = await res.json();
+      job = clone(this.getJob(jobId));
+      if (!job) return;
+
+      if (!data?.ok || !Array.isArray(data.blocks)) {
+        job.llmStatus = data?.reason === "no_key" ? "fallback" : "error";
+        job.llmReason = data?.reason ?? "error";
+        job.llmMessage = data?.message;
+        job.llmIssues = data?.issues;
+        job.updatedAt = now();
+        record({ jobId, actor: "Orchestrator", action: "llm_skipped", detail: `Claude generation did not produce a displayable draft (${data?.reason ?? "error"}).` });
+        replaceJob(job);
+        return;
+      }
+
+      const draft = primaryDraft(job);
+      if (!draft) return;
+      draft.blocks = data.blocks.map((b: { kind: ContentBlock["kind"]; text: string }, i: number) => ({ id: nextId("blk"), order: i, kind: b.kind, text: b.text }));
+      pushVersion(draft, "original_draft", `Claude (${data.model ?? "opus"})`);
+      writeDraftBack(job, draft);
+
+      const text = draft.blocks.map((b) => b.text).join(" ");
+      const internalLinks = (text.match(/\]\(https?:\/\/[^)]*sprout\.ph[^)]*\)/gi) ?? []).length;
+      const externalSources = (text.match(/\]\(https?:\/\/[^)]*\.gov\.ph[^)]*\)/gi) ?? []).length;
+      job.generationReport = validateDraft(draft, job.brief, job.brief.agencyExtract, internalLinks, externalSources);
+
+      // Re-derive the QA handoff from the ACTUAL article so all 8 layers inspect
+      // the real text (real links, and every product sentence re-verified vs GTM).
+      const tier = job.risk?.tier ?? 0;
+      const handoff = deriveHandoffFromBlocks(job.brief, draft.blocks, now(), tier);
+      if (job.production) {
+        job.production.qaHandoffPackage = handoff;
+        job.production.productClaims = handoff.productClaims;
+        job.production.sourceMap = handoff.sourceMap;
+      }
+      job.metrics.productClaimFailures = handoff.productClaims.filter((c) => c.status !== "verified").length;
+      job.qaReport = runQAAgent(draft, handoff, tier, now(), "draft", undefined, job.brief);
+      // Simulated mode: merge the substantive (developmental) edits a real LLM editor
+      // would make — these anchor inline like any other suggestion.
+      if (data.simulated && job.qaReport) {
+        for (const e of findSimulatedQA(job.brief)) {
+          const blk = draft.blocks.find((b) => b.text.includes(e.currentText));
+          if (!blk) continue;
+          job.qaReport.suggestions.push({ id: nextId("sug"), blockId: blk.id, layer: e.layer, issueType: e.issueType, severity: e.severity, currentText: e.currentText, suggestedReplacement: e.suggestedReplacement, advisory: false, explanation: e.explanation, confidence: 0.82, sourceValidationStatus: "n/a", riskTierImpact: null, decision: "pending" });
+          // Reflect the finding in the layer score so the scorecard stays coherent.
+          const layer = job.qaReport.layers.find((l) => l.key === e.layer);
+          if (layer) {
+            layer.score = Math.max(0, Math.round((layer.score - (e.severity === "moderate" ? 0.4 : 0.2)) * 10) / 10);
+            layer.status = layer.score >= 4.5 ? "pass" : layer.score >= 3 ? "revision" : "fail";
+            layer.weaknesses.push(`${e.issueType}: “${e.currentText.slice(0, 44)}${e.currentText.length > 44 ? "…" : ""}”`);
+            layer.recommendedFixes.push(e.explanation);
+          }
+        }
+        const sc = job.qaReport.layers.map((l) => l.score);
+        job.qaReport.overallScore = Math.round((sc.reduce((a, b) => a + b, 0) / sc.length) * 10) / 10;
+      }
+      job.finalQaReport = null;
+      if (job.state === "QA_PASSED") job.state = "QA_REVIEW_READY";
+
+      job.llmStatus = "done";
+      job.llmReason = data.simulated ? "simulated" : undefined;
+      job.draftRevision = (job.draftRevision ?? 0) + 1;
+      job.updatedAt = now();
+      record({ jobId, actor: "Claude", action: "llm_generate", detail: `Article ${data.simulated ? "served from a Claude-written dev fixture" : `written by ${data.model ?? "Claude"}`} (${draft.blocks.length} blocks).` });
+      replaceJob(job);
+    } catch (e) {
+      const j = clone(this.getJob(jobId));
+      if (j) { j.llmStatus = "error"; j.updatedAt = now(); replaceJob(j); }
+    }
+  },
+
+  /** Re-run the full creator + QA pipeline on the same brief (used after a failed gate). */
+  regenerateAll(jobId: string) {
+    const job = clone(this.getJob(jobId));
+    if (!job) return;
+    job.state = "BRIEFED";
+    const ran = runCreatorAndQA(job, now());
+    replaceJob(ran.job, ran.audits);
+  },
+
+  /** Append a stakeholder comment to the draft. */
+  addDraftComment(jobId: string, text: string, author = "marketing@sprout.ph") {
+    const job = clone(this.getJob(jobId));
+    if (!job || !text.trim()) return;
+    job.draftComments = [...(job.draftComments ?? []), { at: now(), author, text: text.trim() }];
+    job.updatedAt = now();
+    record({ jobId, actor: author, action: "draft_comment", detail: text.trim().slice(0, 80) });
+    replaceJob(job);
+  },
+
+  /** Stakeholder routes the draft onward — approval / human review is a USER action. */
+  submitForApproval(jobId: string, actor = "marketing@sprout.ph") {
+    const job = clone(this.getJob(jobId));
+    if (!job) return;
+    const from = job.state;
+    job.humanReview = job.humanReview ?? {
+      reasons: job.reviewRecommendation?.reasons ?? [],
+      assignedReviewer: "Unassigned",
+      productReviewNeeded: job.metrics.productClaimFailures > 0,
+      legalReviewNeeded: !!job.brief.regulatory?.legalReviewNeeded,
+      commsReviewNeeded: false,
+      comments: (job.draftComments ?? []).map((c) => ({ at: c.at, author: c.author, text: c.text })),
+    };
+    job.state = "HUMAN_REVIEW";
+    job.updatedAt = now();
+    record({ jobId, actor, action: "submit_for_approval", detail: "Stakeholder submitted the draft for approval / human review.", fromState: from, toState: "HUMAN_REVIEW" });
     replaceJob(job);
   },
 

@@ -75,6 +75,7 @@ export function intake(brief: StandardizedBrief, owner: string, ts: string): Orc
 
   const risk = assessRisk(brief);
   job.risk = risk;
+  job.briefConflicts = detectBriefConflicts(brief);
   job.metrics.costUsd += 0.4;
   job.state = "BRIEFED";
   job.updatedAt = ts;
@@ -96,8 +97,10 @@ export function runCreatorAndQA(input: Job, ts: string): OrchestratorResult {
     if (job.lane === "production") {
       const out = timed(job, "production_agent", () => runProductionAgent(job.brief, tier, ts));
       job.production = out;
+      job.generationReport = out.generationReport;
       job.metrics.productClaimFailures += out.productClaims.filter((c) => c.status !== "verified").length;
       draft = out.draft;
+      audits.push(audit(job, "Production Agent", "validation", out.generationReport.passed ? `Validation gate passed (${out.generationReport.internalLinks} links, ${out.generationReport.externalSources} sources).` : `Validation gate FAILED: ${out.generationReport.missing.join(", ")}.`, "BRIEFED", "BRIEFED"));
       audits.push(audit(job, "Production Agent", "pim", `Problem-Intent Map ready (${out.problemIntentMap.problems.length} problems).`, "BRIEFED", "PIM_READY"));
       audits.push(audit(job, "Production Agent", "narrative", "Canonical Narrative ready.", "PIM_READY", "NARRATIVE_READY"));
       audits.push(audit(job, "Production Agent", "blueprint", "Content Blueprint ready.", "NARRATIVE_READY", "BLUEPRINT_READY"));
@@ -177,15 +180,58 @@ export function runCreatorAndQA(input: Job, ts: string): OrchestratorResult {
     job.lane === "production" ? job.production!.qaHandoffPackage :
     job.lane === "video_intelligence" ? job.videoTranscript!.qaHandoffPackage :
     job.repurposing!.qaHandoffPackage;
-  const report = timed(job, "qa_agent", () => runQAAgent(draft, handoff, tier, ts, job.lane === "repurposing" ? "derivative" : "draft", job.lane === "repurposing" ? draft.id : undefined));
+  let report: QAReport;
+  if (job.lane === "repurposing" && job.repurposing) {
+    // QA EACH derivative individually — they're distinct channel-native assets, so
+    // each gets its own scores (per the IMD 2.0 / blueprint "per derivative" rule).
+    job.repurposing.derivatives = job.repurposing.derivatives.map((d) =>
+      ({ ...d, qaReport: runQAAgent(d, handoff, tier, ts, "derivative", d.id, job.brief) }));
+    report = job.repurposing.derivatives[0]?.qaReport ?? runQAAgent(draft, handoff, tier, ts, "derivative", draft.id, job.brief);
+  } else {
+    report = timed(job, "qa_agent", () => runQAAgent(draft, handoff, tier, ts, "draft", undefined, job.brief));
+  }
   job.qaReport = report;
   job.metrics.costUsd += 0.8;
   job.state = "QA_REVIEW_READY";
   audits.push(audit(job, "QA Agent", "qa_complete", `QA complete. Overall ${report.overallScore}/5 · routing: ${report.routing}.`, "QA_RUNNING", "QA_REVIEW_READY"));
 
-  applyRouting(job, report, audits, ts);
+  // The stakeholder previews/edits FIRST. Human review is offered as a
+  // recommendation, never an automatic state transition on the initial pass.
+  recommendReview(job, report);
   job.updatedAt = ts;
   return { job, audits };
+}
+
+/** Compute a non-binding human-review recommendation (no state change). */
+function recommendReview(job: Job, report: QAReport) {
+  const reasons = humanReviewReasons(job, report);
+  const needed = reasons.length > 0 || report.routing === "human_review" || report.routing === "block";
+  job.reviewRecommendation = {
+    needed,
+    reasons,
+    note: needed
+      ? "We recommend routing this for human review before approval — but it's your call."
+      : "This draft looks clear of governance flags. You can submit it for approval when you're happy with it.",
+  };
+}
+
+/** Surface mismatches between the uploaded brief and the submitted intake. */
+function detectBriefConflicts(brief: StandardizedBrief): string[] {
+  const ag = brief.agencyExtract;
+  if (!ag) return [];
+  const conflicts: string[] = [];
+  const selected = new Set((brief.products ?? [brief.product]).filter(Boolean));
+  for (const dp of ag.detectedProducts) {
+    if (dp.mapped && dp.slug && !selected.has(dp.slug)) conflicts.push(`The brief references ${dp.name}, but it wasn't selected as a product. Follow the brief?`);
+  }
+  const recTitle = ag.titleOptions[0]?.title;
+  if (recTitle && brief.title && recTitle.toLowerCase() !== brief.title.toLowerCase() && !brief.title.startsWith("Untitled")) {
+    conflicts.push(`The brief's recommended title ("${recTitle}") differs from the submitted title ("${brief.title}").`);
+  }
+  if (ag.primaryKeyword && brief.seoKeyword && ag.primaryKeyword.toLowerCase() !== brief.seoKeyword.toLowerCase()) {
+    conflicts.push(`The brief's primary keyword ("${ag.primaryKeyword}") differs from the submitted keyword ("${brief.seoKeyword}").`);
+  }
+  return conflicts.slice(0, 4);
 }
 
 /* ------------------------------------------------------------------ */
@@ -248,7 +294,7 @@ export function submitToFinalQA(input: Job, revisedDraft: Draft, ts: string): Or
     job.lane === "production" ? job.production!.qaHandoffPackage :
     job.lane === "video_intelligence" ? job.videoTranscript!.qaHandoffPackage :
     job.repurposing!.qaHandoffPackage;
-  const report = runQAAgent(revisedDraft, handoff, tier, ts, job.lane === "repurposing" ? "derivative" : "draft", job.lane === "repurposing" ? revisedDraft.id : undefined);
+  const report = runQAAgent(revisedDraft, handoff, tier, ts, job.lane === "repurposing" ? "derivative" : "draft", job.lane === "repurposing" ? revisedDraft.id : undefined, job.brief);
   job.finalQaReport = report;
   job.metrics.costUsd += 0.8;
 

@@ -66,6 +66,93 @@ export type Readiness = "unaware" | "problem_aware" | "solution_aware" | "evalua
 export type ContentIntent = "awareness" | "consideration" | "evaluation" | "conversion" | "retention" | "advocacy";
 export type RiskSensitivity = "low" | "moderate" | "high";
 
+/**
+ * Plain-language framing of each content intent for the requestor-facing
+ * "What should this content achieve?" buttons. The underlying value stays the
+ * ContentIntent enum so the orchestrator and QA strategic-alignment layer are
+ * unaffected.
+ */
+export const INTENT_GOALS: { intent: ContentIntent; label: string; icon: string }[] = [
+  { intent: "awareness", label: "Build awareness", icon: "📣" },
+  { intent: "consideration", label: "Generate demand", icon: "📈" },
+  { intent: "evaluation", label: "Compare solutions", icon: "⚖️" },
+  { intent: "conversion", label: "Encourage demos", icon: "🤝" },
+  { intent: "retention", label: "Support customers", icon: "💬" },
+  { intent: "advocacy", label: "Build advocacy", icon: "🌟" },
+];
+
+/**
+ * Requestor-facing content goals ("What should this content achieve?").
+ * Multi-select. Each maps to a ContentIntent so the orchestrator and QA
+ * strategic-alignment layer keep working on the existing enum.
+ */
+export const CONTENT_GOALS: { label: string; intent: ContentIntent; icon: string }[] = [
+  { label: "Educate the audience", intent: "awareness", icon: "🎓" },
+  { label: "Build awareness", intent: "awareness", icon: "📣" },
+  { label: "Help readers compare options", intent: "evaluation", icon: "⚖️" },
+  { label: "Support solution evaluation", intent: "evaluation", icon: "🔍" },
+  { label: "Encourage validation or demo interest", intent: "conversion", icon: "🤝" },
+  { label: "Support existing customers", intent: "retention", icon: "💬" },
+  { label: "Build thought leadership", intent: "advocacy", icon: "🌟" },
+];
+
+/** Derive the ContentIntent set the pipeline needs from the chosen goals. */
+export function intentsFromGoals(goals: string[]): ContentIntent[] {
+  const set = new Set<ContentIntent>();
+  for (const g of goals) {
+    const match = CONTENT_GOALS.find((c) => c.label === g);
+    if (match) set.add(match.intent);
+  }
+  return set.size ? Array.from(set) : ["awareness"];
+}
+
+/** Suggested pain points (multi-select); requestor may add a free-text "Other". */
+export const PAIN_POINT_OPTIONS: string[] = [
+  "Manual processes",
+  "Compliance risk",
+  "Payroll errors",
+  "Employee turnover",
+  "Recruitment challenges",
+  "Lack of HR visibility",
+  "Poor employee engagement",
+  "Limited reporting",
+  "Difficulty scaling operations",
+  "Technology adoption issues",
+];
+
+/** Standardized industry list (ISIC-aligned) for the Audience section dropdown. */
+export const INDUSTRIES: string[] = [
+  "Accommodation and Food Services",
+  "Administrative and Support Services",
+  "Arts, Entertainment and Recreation",
+  "Construction",
+  "Education",
+  "Finance and Insurance Activities",
+  "Human Health and Social Work Activities",
+  "Information and Communication",
+  "Manufacturing",
+  "Professional, Scientific and Technical Services",
+  "Real Estate Activities",
+  "Transportation and Storage",
+  "Wholesale and Retail Trade",
+];
+
+/** Standardized tone vocabulary for the multi-select tone control. */
+export const TONES: string[] = [
+  "Professional",
+  "Conversational",
+  "Executive",
+  "Thought Leadership",
+  "Educational",
+  "Helpful",
+  "Analytical",
+  "Technical",
+  "Human",
+  "Authoritative",
+  "Inspirational",
+  "Practical",
+];
+
 /** Regulatory Addendum — required when source is a regulatory update. */
 export interface RegulatoryAddendum {
   issuingBody: string; // DOLE / SSS / BIR / PhilHealth / Pag-IBIG / etc.
@@ -110,7 +197,23 @@ export interface StandardizedBrief {
   channel: string;
   mustInclude: string[];
   mustAvoid: string[];
-  product: string; // GTM Studio product slug, or "" for none
+  product: string; // GTM Studio primary product slug, or "" for none
+  products?: string[]; // all selected GTM Studio product slugs (multi-select); product mirrors products[0]
+  contentFormat?: "standard" | "listicle"; // blog content format
+  listSpec?: ListicleSpec; // present when contentFormat === "listicle"
+  contentGoals?: string[]; // requestor-facing goal labels; contentIntent[] is derived from these
+  contentAngle?: string;
+  audienceDetails?: string;
+  companySize?: string;
+  geography?: string;
+  triggerEvents?: string[];
+  primaryKeyword?: string;
+  secondaryKeywords?: string[];
+  keywordVariations?: string[];
+  paaQuestions?: string[];
+  searchIntent?: string;
+  ctaType?: string;
+  agencyExtract?: AgencyBriefExtract; // full structured agency-brief capture
   cta: string;
   campaign: string;
   seoKeyword: string;
@@ -136,6 +239,99 @@ export interface StandardizedBrief {
   regulatory?: RegulatoryAddendum;
   competitorAddendum?: CompetitorAddendum;
   research?: ResearchAddendum;
+}
+
+/** Listicle structure — pins the list so the AI doesn't invent its shape. */
+export interface ListicleSpec {
+  itemCount: number; // up to 20
+  featured: string[]; // companies / solutions / competitors to feature, in order
+  mandatoryInclusions: string; // anything that must appear
+}
+
+/* ------------------------------------------------------------------ */
+/* Agency SEO brief model                                             */
+/* ------------------------------------------------------------------ */
+
+export const SEARCH_INTENTS = ["Informational", "Commercial investigation", "Transactional", "Navigational", "Mixed intent"] as const;
+export type SearchIntent = (typeof SEARCH_INTENTS)[number];
+
+export const CONTENT_ANGLES = ["Decision framework", "Reframe-first", "ICP-specific", "Comparison", "Buyer guide", "Compliance-led", "Thought leadership"] as const;
+
+export const CTA_TYPES = ["Demo", "Validation", "Download", "Consultation", "Product evaluation", "Newsletter", "No CTA"] as const;
+export type CtaType = (typeof CTA_TYPES)[number];
+
+export interface CompetitorGap {
+  url: string;
+  analysis: string;
+}
+
+export interface KeywordRow {
+  keyword: string;
+  type: "Primary" | "Secondary" | "Variation";
+  volume?: string;
+  kd?: string;
+  paa?: boolean;
+}
+
+export interface OutlineSection {
+  heading: string;
+  writingDirection: string;
+  specialInstructions?: string;
+}
+
+export interface DetectedProduct {
+  name: string; // as named in the brief
+  slug?: string; // mapped GTM Studio slug, if matched
+  mapped: boolean;
+  source: string; // where in the brief it was found
+}
+
+export interface TitleOption {
+  angle?: string;
+  title: string;
+}
+
+/**
+ * Structured capture of an agency SEO brief (Part 1 + Part 2). Stored on the
+ * brief so nothing extracted is lost; the critical fields are also mirrored
+ * onto the StandardizedBrief top level for the orchestrator/agents.
+ */
+export interface AgencyBriefExtract {
+  // Part 1 — Foundational strategic analysis
+  topicIntent?: string;
+  searchIntent?: string;
+  serpOpportunity?: string;
+  competitorGaps: CompetitorGap[];
+  audienceDetails?: string;
+  companySize?: string;
+  geography?: string;
+  triggerEvents: string[];
+  businessGoal?: string;
+  keyMessaging: string[];
+  painPoints: string[];
+  complianceContext?: string;
+  positioning?: string;
+  contentAngle?: string;
+  // Part 2 — Executable content plan
+  titleOptions: TitleOption[];
+  outline: OutlineSection[];
+  faqRequirements?: string;
+  ctaText?: string;
+  ctaType?: string;
+  wordCount?: string;
+  productionFormat?: string;
+  schema?: string;
+  media?: string;
+  productMentionRules?: string;
+  proofRequirements?: string;
+  // Keywords
+  keywords: KeywordRow[];
+  primaryKeyword?: string;
+  secondaryKeywords: string[];
+  keywordVariations: string[];
+  paaQuestions: string[];
+  // Products
+  detectedProducts: DetectedProduct[];
 }
 
 export interface DesiredOutput {
@@ -337,7 +533,7 @@ export const QA_LAYERS: { key: QALayerKey; index: number; name: string; short: s
   { key: "channel_optimization", index: 5, name: "Channel-Specific Optimization", short: "Channel" },
   { key: "tone_authenticity", index: 6, name: "Tone Authenticity & AI Detection", short: "Authenticity" },
   { key: "visual_structural", index: 7, name: "Visual & Structural Integrity", short: "Visual" },
-  { key: "product_gtm_accuracy", index: 8, name: "Product & GTM Accuracy", short: "Product/GTM" },
+  { key: "product_gtm_accuracy", index: 8, name: "Product & GTM Verification", short: "Product/GTM" },
 ];
 
 export type QAStatus = "pass" | "revision" | "fail";
@@ -362,6 +558,8 @@ export interface QASuggestion {
   severity: Severity;
   currentText: string;
   suggestedReplacement: string;
+  /** advisory = guidance only (no exact text swap); rewrite = applies an inline before→after edit. */
+  advisory?: boolean;
   explanation: string;
   confidence: number; // 0..1
   sourceValidationStatus: ClaimStatus | "n/a";
@@ -420,11 +618,33 @@ export interface Draft {
 export interface Derivative extends Draft {
   intent: ContentIntent;
   derivedFromSourceAssetId: string;
+  /** Each derivative is QA'd individually (IMD 2.0: "QA Agent, per derivative"). */
+  qaReport?: QAReport;
 }
 
 /* ------------------------------------------------------------------ */
 /* Agent output packages                                              */
 /* ------------------------------------------------------------------ */
+
+/** One pre-publish validation check against the brief. */
+export interface GenerationCheck {
+  label: string;
+  ok: boolean;
+  detail?: string;
+}
+
+/**
+ * The validation gate result. If `passed` is false the orchestrator must NOT
+ * surface the draft as ready — the review screen shows the failure message and
+ * this checklist instead.
+ */
+export interface GenerationReport {
+  passed: boolean;
+  checks: GenerationCheck[];
+  missing: string[];
+  internalLinks: number;
+  externalSources: number;
+}
 
 export interface ProductionOutput {
   brief: StandardizedBrief;
@@ -436,6 +656,7 @@ export interface ProductionOutput {
   productClaims: ProductClaim[];
   factualClaims: FactualClaim[];
   sourceMap: SourceMapEntry[];
+  generationReport: GenerationReport;
   qaHandoffPackage: QAHandoffPackage;
 }
 
@@ -721,6 +942,25 @@ export interface Job {
 
   qaReport: QAReport | null;
   finalQaReport: QAReport | null;
+
+  /** Non-binding recommendation surfaced to the stakeholder; routing to human
+   * review is a USER action, not an automatic state transition. */
+  reviewRecommendation?: { needed: boolean; reasons: HumanReviewKind[]; note: string };
+  /** Detected mismatches between the uploaded brief and the submitted intake. */
+  briefConflicts?: string[];
+  /** Pre-publish validation gate result. If not passed, the draft is withheld. */
+  generationReport?: GenerationReport;
+  /** Real (LLM) article generation status. Absent = not attempted. */
+  llmStatus?: "writing" | "done" | "fallback" | "error";
+  /** Why real generation didn't produce a displayable draft (no_key, quality, error…). */
+  llmReason?: string;
+  llmMessage?: string;
+  llmIssues?: string[];
+  /** Bumped when the draft body is replaced EXTERNALLY (generation, regenerate),
+   * so the WYSIWYG editor remounts; autosaves from the editor do NOT bump it. */
+  draftRevision?: number;
+  /** Stakeholder comments left on the draft during preview/editing. */
+  draftComments?: { at: string; author: string; text: string }[];
 
   humanReview: HumanReviewTicket | null;
   metrics: JobMetrics;
